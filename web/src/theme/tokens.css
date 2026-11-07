@@ -1,0 +1,33 @@
+/* micavoss tokens: rack-film-website/web/assets/css/site.css:7-23 and rack-film_netbird/src/theme.ts,
+   verbatim, plus the data colours. "Grey plus lime: lime marks the one thing that matters." */
+:root {
+  --bg: #0a0d10;
+  --bg2: #11151a;
+  --panel: #161b22;
+  --panel2: #1b2129;
+  --border: #262c35;
+  --grid: #1d232b;
+  --lime: #c8f542;
+  --lime-dim: #8da92e;
+  --lime-glow: rgba(200, 245, 66, 0.35);
+  --lime-fill: rgba(200, 245, 66, 0.1);
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --faint: #5b636d;
+  --red: #c9605f;
+  --err: #e08585;
+  --amber: #ffb020;
+  --cyan: #3fd5ff;
+  --pink: #ff5fb8;
+  --track: #2a3038;
+  --grey: #c9ced4;
+  --grey2: #9aa1a9;
+  --glass: rgba(10, 13, 16, 0.82);
+  --glass-card: rgba(22, 27, 34, 0.78);
+  --display: "Oswald", "Arial Narrow", sans-serif;
+  --sans: "DM Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --rail: 84px;
+  --rail-open: 224px;
+  color-scheme: dark;
+}

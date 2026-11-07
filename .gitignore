@@ -1,0 +1,47 @@
+# Build output
+/bin/
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+/web/node_modules/
+/web/coverage/
+*.tsbuildinfo
+*.test
+*.prof
+coverage.out
+
+# Local workspace (links sibling checkouts such as ../tilecache during development)
+/go.work
+/go.work.sum
+
+# Runtime data and secrets never belong in the repository
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+/data/
+*.log
+
+# Personal watch data: captures, FIT files, exports stay in ~/goarmin-captures
+btsnoop_hci.log*
+*.btsnoop
+*.cfa
+*.pcap
+*.pcapng
+*.fit
+*.FIT
+*.gpx
+*.tcx
+# Garmin Connect exports and zipped USB copies
+*.zip
+# Backups (make backup writes them to ~/goarmin-backups)
+goarmin_backup_*.tar.gz
+
+# Editors and the OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+.claude/settings.local.json

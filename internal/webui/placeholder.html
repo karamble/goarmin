@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>goarmin</title>
+<style>
+  :root { --bg: #0a0d10; --panel: #161b22; --border: #262c35; --lime: #c8f542; --text: #e6edf3; --muted: #8b949e; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 17px/1.65 system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { min-height: 100%; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+  .card { max-width: 520px; background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
+    padding: 30px 28px; box-shadow: 0 30px 80px rgba(0,0,0,.35); }
+  .label { font: 500 13px ui-monospace, monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--lime); }
+  h1 { font: 700 40px/1.05 "Arial Narrow", sans-serif; text-transform: uppercase; margin: 10px 0 12px; letter-spacing: .01em; }
+  p { color: var(--muted); margin: 0; }
+  code { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="label">goarmin</div>
+    <h1>Dashboard not built</h1>
+    <p>This binary was built without the web dashboard. Run <code>make build</code> to build the
+      frontend and embed it. The API is available under <code>/api</code>.</p>
+  </div>
+</main>
+</body>
+</html>
