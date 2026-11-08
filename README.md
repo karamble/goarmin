@@ -1,156 +1,105 @@
 # goarmin
 
-A self-hosted replacement for Garmin Connect. goarmin pulls the files straight
-from your Garmin watch over Bluetooth on Linux, keeps them on your own machine,
-and shows them in a web dashboard with an account for each person in the
-household. No Garmin account, phone or cloud is involved.
+A self-hosted replacement for Garmin Connect. goarmin syncs your Garmin watch over Bluetooth on
+Linux, imports your history from the watch on USB and from Garmin's data export, and keeps
+everything on your own machine. It shows it all in a web dashboard, with an account for each
+person in the household. No Garmin account, phone or cloud is needed.
 
-It works with one watch so far: a Fenix 8 (47 mm, firmware 23.40), on BlueZ
-5.87. The protocol notes in [docs/protocol](docs/protocol) come from a capture
-of Garmin Connect syncing that watch, and from Gadgetbridge's open-source Garmin
-support. Gadgetbridge was read for reference only; none of its AGPL code is in
-goarmin.
+![At a glance](docs/images/glance.png)
 
 ## What it does
 
-- **Sync.** Add a watch from the browser (a pairing wizard) or with
-  `goarmin pair`. goarmin then connects every 30 minutes, lists what is new and
-  pulls it. For each watch you choose what happens afterwards: keep the files
-  on the watch, so another app can still sync them, or mark them as synced,
-  as Garmin Connect does.
-- **Raw files are the source of truth.** They are stored content-addressed, and
-  everything else can be rebuilt from them (`goarmin reingest`).
-- **Health.** Sleep (score, stages, overnight values), HRV against its baseline,
-  heart rate, stress and Body Battery, breathing and movement, each by day,
-  week, month and year.
+- **Sync.** Add a watch from the browser (a pairing wizard with the watch's code). goarmin syncs
+  it every 30 minutes and on request. For each watch you choose whether files stay on it for
+  another app, or are marked as synced as Garmin Connect does.
+- **Health.** Each by day, week, month and year:
+  - sleep with stages, scores and naps;
+  - HRV against its baseline, and Garmin's health status;
+  - heart rate with ECG recordings;
+  - stress and Body Battery, breathing, movement;
+  - body: weigh-ins from a scale, skin temperature, hydration, fitness age.
 - **Training.**
-  - Activities: a map, linked charts, laps, splits and time in zones.
-  - Performance: VO2 max, training status, load, race predictions.
-  - Garmin Coach's plan.
-  - The workouts and courses saved on the watch, and lifetime totals.
-- **Live.** Heart rate, stress, Body Battery, breathing, steps, calories and
-  floors, as the watch measures them.
-- **Devices.** Battery, the sync log, the files fetched from each watch.
-  Unpair a watch, hand it over to another account, or delete its data.
-- **At a glance.** A dashboard of cards you arrange yourself.
-- **Accounts.** Passkeys or passwords, by invitation; the first account is the
-  admin. Everyone sees only their own data, and admins don't see other
-  people's health data either.
-- **Import.** FIT files from a USB copy of the watch (`goarmin import`). Import
-  from the browser, from a watch plugged in by USB, and from the Garmin Connect
-  data export are being built.
+  - Activities with a map, linked charts, laps, splits and time in zones.
+  - Performance over the years: VO2 max, training status, readiness, load, race predictions,
+    endurance, hill score.
+  - Garmin Coach's plan, the watch's workouts and courses, personal records, gear.
+- **Live.** Heart rate, stress, Body Battery, breathing, steps, calories and floors as the watch
+  measures them.
+- **Devices.** Watches, scales and every other device you had:
+  - battery, the sync log, the files each brought, and an inspector that names every field of
+    any FIT file;
+  - unpair a watch, hand it over to another account, or delete its data.
+- **Import.** The Garmin Connect export (years of history in about a minute), a watch plugged in
+  by USB (read-only, automatic), or any FIT files, folders and zips.
+- **At a glance.** A board of cards you arrange yourself.
+- **Accounts.** Passkeys or passwords, by invitation. Everyone sees only their own data; admins
+  don't see other people's health data either.
+
+| | |
+|---|---|
+| ![Sleep](docs/images/sleep.png) | ![An activity](docs/images/activity.png) |
+| ![Performance](docs/images/performance.png) | |
+
+*Screenshots show made-up data.*
 
 ## Privacy
 
-- Your data stays in the data directory (`~/.local/share/goarmin` by default):
-  a SQLite database and the raw files.
-- The dashboard loads everything from goarmin itself, fonts included, and makes
-  no requests to third parties.
-- The only requests goarmin makes are for map tiles, and only if you configure
-  a tile server. The server fetches them with a regular browser User-Agent,
-  caches them, and serves them only to signed-in users, privately cached.
-- When the watch asks the phone for its position, goarmin answers that
-  location services are off.
-
-## Requirements
-
-- Linux with BlueZ and a Bluetooth LE adapter. The user running goarmin needs
-  access to BlueZ over D-Bus; a desktop session has it, and no root is needed.
-- Go 1.27.3.
-- Node.js and npm, to build the dashboard. Tested with Node 26 and npm 11.
-- sqlite3, for backups and the inspection targets (`make list-users`, `make db-shell`, …).
-- GNU time (`/usr/bin/time`; on Arch the `time` package), for `make bench-import`.
-
-`make check-tools` checks for all of them.
+- Your data stays in one directory (`~/.local/share/goarmin`): a SQLite database and the raw
+  files, from which everything else can be rebuilt.
+- The dashboard loads everything from goarmin itself and makes no requests to third parties.
+- goarmin's only outside requests are for map tiles, and only if you configure a tile server.
+- When the watch asks for its position, goarmin answers that location services are off.
 
 ## Quick start
 
+On a Linux computer with Bluetooth, near the watch:
+
 ```sh
+git clone https://github.com/karamble/goarmin.git && cd goarmin
 make web-deps    # once: the dashboard's npm packages
-make start       # build, then start the server with the sync role on http://localhost:8642
-make logs        # on the first start, the log shows the setup link for the admin account
+make start       # build and start on http://localhost:8642
+make logs        # the first start prints the link that creates your account
 ```
 
-Open the setup link and create your account. Then go to **Devices › Add a
-watch** and follow the steps; the watch shows a code to confirm. `make help`
-lists every target, including `stop`, `status`, `backup` and `restore`.
+Then **Devices › Add a watch**, and **Devices › Import** for your Garmin Connect export. The
+full walk-through is [docs/getting-started.md](docs/getting-started.md).
 
-## In Docker
+**In Docker:** `docker/` runs the server in a container, on a private network or behind a reverse proxy with HTTPS. See
+[docker/README.md](docker/README.md). The sync role stays on the computer the watch is paired
+with.
 
-`docker/` runs the server (API, database, dashboard) in a container, behind a
-reverse proxy with HTTPS: see [docker/README.md](docker/README.md). The sync
-role stays on a computer the watch is paired with. `make docker-dev-up` tries
-the image on a scratch copy of your data at http://localhost:18642.
+## Supported watches
 
-## Configuration
+goarmin is developed and tested with a **Garmin Fenix 8** on BlueZ 5.87. Other recent Garmin
+watches that sync the same way (Garmin's FileAccess sync) are likely to work but are untested.
+Reports are welcome. Imports read FIT files from any Garmin device, so older watches and
+scales show up through the export.
 
-`goarmin serve -h` lists the flags. Each has an environment variable, and
-`make` also reads a `.env` file in the checkout (git-ignored).
+## Documentation
 
-| Variable | Meaning |
+| | |
 |---|---|
-| `GOARMIN_DATA_DIR` | Data directory (default `~/.local/share/goarmin`) |
-| `GOARMIN_LISTEN` | Address to listen on (default `127.0.0.1:8642`) |
-| `GOARMIN_PUBLIC_URL` | The URL people open. Passkeys are bound to its host and need HTTPS beyond `localhost`. |
-| `GOARMIN_ADAPTER` | Bluetooth adapter (default `hci0`) |
-| `GOARMIN_TILE_URL` | Map tiles: a preset (`jawg-matrix`, `jawg-dark`) or a URL template with `{z}`, `{x}`, `{y}`, and optionally `{s}` and `{token}`. Without one, routes are drawn without a map. OpenStreetMap's own servers are refused, because they require an identifying User-Agent. |
-| `GOARMIN_TILE_TOKEN` | The access token for `{token}` in the tile URL. It is never logged. |
-| `GOARMIN_TILE_DARK`, `GOARMIN_TILE_ATTRIBUTION` | For a tile style that isn't a preset: whether it is dark already, and its credit line |
-| `GOARMIN_FEATURES` | `0` stops goarmin from telling the watch which features it supports |
-| `GOARMIN_BACKUP_DIR` | Where `goarmin backup` writes archives (default `~/goarmin-backups`) |
+| [Getting started](docs/getting-started.md) | Install, first account, add your watch, import your history |
+| [User guide](docs/user-guide.md) | The dashboard, page by page |
+| [Running goarmin](docs/running.md) | One computer or a server, Docker, HTTPS, backups, updates, settings |
+| [Architecture](docs/architecture.md) | How the sync, imports and storage work |
+| [The data](docs/data.md) | What goarmin reads from FIT files and the export, and which source wins |
+| [Development](docs/development.md) | Build, test, change the code |
+| [API](docs/api.md) | The HTTP API |
+| [Protocol notes](docs/protocol/README.md) | How a Garmin watch talks over Bluetooth |
 
-## Commands
+## Status
 
-```
-serve       run the API and the dashboard (-with-sync also syncs this computer's watches)
-pair        pair a Garmin watch with this computer (interactive)
-probe       connect to a paired watch and run the protocol handshake
-sync        pull new files from a paired watch into the local spool (-once)
-live        stream live values (heart rate, steps, stress, …) from a paired watch
-import      store and ingest FIT files (a USB copy of the watch, a sync spool)
-usb         list the watches on USB, or copy one's GARMIN folder (read-only)
-reingest    extract the health data of the stored files again
-days        print the daily summaries of an account
-activities  list the activities of an account
-user        list the accounts, or set an account's password (-set-password, read from stdin)
-backup      write a backup archive, consistent while the server runs (make backup)
-healthcheck exit 0 if the server here answers /healthz (container health checks)
-version     print the version
-```
+goarmin is young and used daily by its author. Planned next is a separate **sync node**, so the
+server can run anywhere while the computer near the watch syncs to it. Later come a workout
+builder and an optional bridge to Garmin for satellite data and firmware.
 
-## Layout
+goarmin was written from scratch. Gadgetbridge's open-source Garmin support and a capture of
+Garmin Connect served as protocol references; none of Gadgetbridge's code is in goarmin.
 
-- `cmd/goarmin`: the binary.
-- `pkg/`: packages meant to be reused elsewhere.
-  - `bluez`: BlueZ over D-Bus.
-  - `garmin/...`: the watch protocol (Multi-Link, GFDI, the protobuf services,
-    file access, live values) and a fake watch for tests.
-  - FIT readers: `fitid`, `fitactivity`, `fitwatch`.
-  - Helpers: `btsnoop`, `cobs`, `clock`, `httpx`.
-- `internal/`: the application. `api`, `store`, `ingest`, `nodehub` (the sync
-  role), `syncnode`, `tiles`, `webui`.
-- `web/`: the dashboard (React, Vite, Tailwind, ECharts, Leaflet), built into
-  `internal/webui/dist` and embedded in the binary.
-- `tools/`: `snoopdecode` (Bluetooth captures), `fitinspect`, and `devseed`
-  (made-up data for a scratch server).
-- `docs/`: [the API](docs/api.md), [research](docs/research.md) and
-  [the protocol](docs/protocol).
-
-## Development
-
-- `make check` runs gofmt, go vet, the Go tests and the dashboard's type check
-  and tests. Tests never use fixed dates: every time derives from the clock,
-  and a guard test enforces it.
-- `make dev-frontend` runs Vite on `:5173` against the server on `:8642`.
-- `go.mod` changes only through `go mod tidy`. `make dep MOD=module@version`
-  fetches a new module with git and a browser User-Agent.
-- To work on the tile cache ([github.com/karamble/tilecache](https://github.com/karamble/tilecache))
-  at the same time, a local `go.work` with `use (. ../tilecache)` links your
-  checkout; it is git-ignored.
-
-Garmin, Fenix and Garmin Connect are trademarks of Garmin Ltd. goarmin is not
-affiliated with or endorsed by Garmin.
+Garmin, Fenix and Garmin Connect are trademarks of Garmin Ltd. goarmin is not affiliated with
+or endorsed by Garmin.
 
 ## License
 
-ISC, see [LICENSE](LICENSE).
+ISC, see [LICENSE](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).

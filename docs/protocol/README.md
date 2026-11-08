@@ -8,7 +8,11 @@ implementation, which pulls files directly from the watch on Linux.
   `~/go/src/codeberg.org/Freeyourgadget/Gadgetbridge`). Every claim cites a file and line there.
 - **Cross-checks:** garmin-proto-lab, garmin-ble, garmin-bridge, braycarlson/gfdi and GarminHRM600,
   all cloned under `~/go/src/github.com/`. Agreements and disagreements are noted inline.
-- **Written:** 2026-11-07. Nothing here has been tested against our Fenix 8 yet.
+- **Written:** 2026-11-07, from the sources, before goarmin's own code talked to a watch. What
+  was then observed and verified on a real Fenix 8 is in [05](05-fenix8-capture.md) (Garmin
+  Connect's own sync, captured) and [06](06-linux-live.md) (goarmin's sync on Linux); where they
+  differ from the notes below, 05 and 06 win. How goarmin is built on top is in
+  [architecture.md](../architecture.md).
 - **Example bytes** in these notes were computed by the research agents. Re-derive them in Go unit
   tests from the CRC and COBS implementations rather than copying them.
 

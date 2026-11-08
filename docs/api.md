@@ -1,5 +1,9 @@
 # goarmin HTTP API
 
+Every route the server answers, for scripts and other clients. The dashboard uses the same
+API. Back to the [documentation index](README.md); how the pieces fit is in
+[architecture.md](architecture.md).
+
 `goarmin serve` runs the API and the embedded dashboard on one origin. With `--with-sync` it
 also runs the sync role:
 - it syncs this computer's watches on a schedule (`--sync-interval`, 30 min; after a failure

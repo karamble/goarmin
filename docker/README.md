@@ -1,5 +1,8 @@
 # goarmin in Docker
 
+Part of the [documentation](../docs/README.md). The choices around it (one computer or a
+server, HTTPS, backups, updates) are in [running.md](../docs/running.md).
+
 This directory runs goarmin's **server** in a container: the API, the database and the dashboard.
 The **sync role** talks to the watch over Bluetooth, so it stays on a computer the watch is
 paired with. Until the sync node arrives (M7), that is `make start` on that computer. Then it
@@ -30,8 +33,12 @@ becomes a sync node that uploads to this server.
    docker compose --env-file ~/.config/goarmin/compose.env up -d
    ```
 
-   The container listens on 8642 on the compose network only. Put a reverse proxy in front that
-   publishes it over HTTPS, in an override file of your own. `GOARMIN_PUBLIC_URL` must be the
+   The container listens on 8642 on the compose network only. Publish it in an override file of
+   your own, in one of two ways:
+   - **Behind a reverse proxy with HTTPS.** Needed for passkeys and for anything beyond a
+     private network.
+   - **Directly over plain HTTP on a private network** (`ports: ["8642:8642"]`). Everyone then
+     signs in with a password. `GOARMIN_PUBLIC_URL` must be the
    address people open (`https://host:port`), because:
    - passkeys are bound to its host name, and the origin is its scheme, host and port;
    - `https` makes the session cookies Secure.

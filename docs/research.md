@@ -1,5 +1,10 @@
 # goarmin research notes
 
+> **History.** These notes were written on 2026-11-06, before the first line of code, and are
+> kept as they were. What goarmin does now is in [architecture.md](architecture.md) and
+> [data.md](data.md); what was verified on the watch is in
+> [protocol/05](protocol/05-fenix8-capture.md) and [protocol/06](protocol/06-linux-live.md).
+
 Status: explore and research phase, nothing implemented yet. Last updated 2026-11-06.
 
 goarmin is a self-hosted Go application that replaces Garmin Connect. It pulls data
