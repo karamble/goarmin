@@ -129,6 +129,16 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
+// DeleteUserSessions ends every session of user (after a password reset) and says how many.
+func (s *Store) DeleteUserSessions(ctx context.Context, user int64) (int, error) {
+	res, err := s.db.W.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, user)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
 // DeleteSessionByID ends one of user's sessions by its ID.
 func (s *Store) DeleteSessionByID(ctx context.Context, user int64, id string) error {
 	if len(id) != 16 {

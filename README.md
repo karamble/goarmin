@@ -100,6 +100,7 @@ usb         list the watches on USB, or copy one's GARMIN folder (read-only)
 reingest    extract the health data of the stored files again
 days        print the daily summaries of an account
 activities  list the activities of an account
+user        list the accounts, or set an account's password (-set-password, read from stdin)
 version     print the version
 ```
 

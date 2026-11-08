@@ -32,6 +32,7 @@ commands:
   usb       list the watches on USB, or copy one's GARMIN folder (read-only)
   reingest  extract the health data of the stored files again
   days      print the daily summaries of an account
+  user      list the accounts, or set an account's password (-set-password)
   activities  list the activities of an account
   version   print the version
   help      show this help
@@ -69,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runActivities(args[1:], stdout, stderr)
 	case "days":
 		return runDays(args[1:], stdout, stderr)
+	case "user":
+		return runUser(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		fmt.Fprintln(stdout, versionString())
 		return 0

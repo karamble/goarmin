@@ -406,3 +406,18 @@ range (`hrv_last_night`, `hrv_target_low/high`). After a reingest, the user's ac
     weekly goal (u32 LE, 150). The server logs every changed message of a service it cannot
     read yet ("realtime message not read yet"), so the other fields can be worked out once
     the week has intensity minutes.
+
+## The Fenix 8 on USB (2026-11-08)
+
+- On USB the Fenix 8 is `091e:51b8` with no USB name strings; its MTP interface is found and
+  claimed through usbfs without root (libmtp's `mtp-probe` plus systemd's uaccess rule).
+- **The USB serial is the unit number in hexadecimal**, zero-padded to 12 digits (unit
+  3912345678 would be `0000e931a84e`). MTP DeviceInfo reports manufacturer "Garmin", model
+  "fenix 8 - 47mm", version "2340" (23.40) and the same serial. One storage, "Internal
+  Storage" (29.6 GB).
+- GARMIN holds 241 FIT files and 169 others (maps, audio, apps, weather, logs). Compared with
+  what Bluetooth delivered, USB adds **one metrics file (FIT 44) a day in `GARMIN/Debug`** (36
+  files from 2026-10-08), activity summaries (FIT 20, some recorded by an earlier Instinct 2)
+  and a few single files.
+- `Sleep`, `HRVStatus`, `SkinTemp` and `SlpDisr` were empty at 01:30; `Metrics` held only the
+  two files Bluetooth had brought. Whether a night fills them is still open.
