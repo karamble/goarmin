@@ -10,7 +10,7 @@ import { useDevices } from '../../api/hooks/data'
 import { useSyncNow } from '../../api/hooks/devices'
 import type { Device } from '../../api/types'
 import { HeaderActions } from '../../app/section/HeaderSlot'
-import { alerts, deviceName, groupDevices, isWatch, kindWord, subtitle, syncLine, toneDot } from '../../lib/devices'
+import { alerts, canPair, deviceName, groupDevices, isWatch, kindWord, subtitle, syncLine, toneDot } from '../../lib/devices'
 import { ago } from '../../lib/format'
 import { relDay, today } from '../../lib/period'
 import { Skeleton } from '../../ui/kit'
@@ -32,7 +32,7 @@ export default function Watches() {
   const watches = current.filter(isWatch)
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
-      {me.server.sync && (
+      {canPair(me) && (
         <HeaderActions>
           <Link to="/devices/add"
             className={`inline-flex h-9 items-center gap-2 rounded-full px-4 text-[13px] font-bold ${current.length === 0
@@ -55,10 +55,11 @@ export default function Watches() {
         <div className="card grid place-items-center px-6 py-14 text-center">
           <p className="m-0 font-display text-[24px] uppercase">No watch yet</p>
           <p className="m-0 mt-2 max-w-[460px] text-[14px] text-muted">
-            {me.server.sync ? 'Add your Garmin watch: goarmin pairs it with this computer and fetches its data from then on.'
-              : 'This server does not sync watches over Bluetooth. Run goarmin serve --with-sync on the computer near your watch, or import files.'}
+            {canPair(me) ? 'Add your Garmin watch: goarmin pairs it with this computer and fetches its data from then on.'
+              : me.server.sync ? 'Watches sync through a sync node: pair the watch on the computer near it (goarmin pair), and it appears here with its first sync.'
+              : 'This server does not sync watches over Bluetooth. Sign in the computer near your watch as a sync node (Devices › Sync nodes), or import files.'}
           </p>
-          {me.server.sync && (
+          {canPair(me) && (
             <Link to="/devices/add" className="mt-5 inline-flex items-center gap-2 rounded-full border-2 border-lime bg-lime px-5 py-2.5 text-[14px] font-bold text-bg">
               <Plus size={16} /> Add a watch
             </Link>
@@ -68,7 +69,7 @@ export default function Watches() {
         <>
           {watches.length === 0 && (
             <p className="card m-0 px-4 py-3 text-[14px] text-muted">
-              No watch yet.{me.server.sync && <> <Link to="/devices/add" className="text-lime hover:underline">Add a watch</Link> to sync it over Bluetooth.</>}
+              No watch yet.{canPair(me) && <> <Link to="/devices/add" className="text-lime hover:underline">Add a watch</Link> to sync it over Bluetooth.</>}
             </p>
           )}
           {groups.map((g) => (

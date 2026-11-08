@@ -5,8 +5,8 @@ server, HTTPS, backups, updates) are in [running.md](../docs/running.md).
 
 This directory runs goarmin's **server** in a container: the API, the database and the dashboard.
 The **sync role** talks to the watch over Bluetooth, so it stays on a computer the watch is
-paired with. Until the sync node arrives (M7), that is `make start` on that computer. Then it
-becomes a sync node that uploads to this server.
+paired with: a sync node there (`make node-start`, or `compose.syncer.yaml` below) syncs it and
+hands the files to this server.
 
 | File | What it is |
 |---|---|
@@ -14,6 +14,7 @@ becomes a sync node that uploads to this server.
 | `Dockerfile.dockerignore` | Only sources go into the build: never data, secrets, backups or build output. |
 | `compose.yaml` | The app only: no host port, a data and a backup bind mount, an `env_file`, read-only root, all capabilities dropped, a health check, rotated logs. |
 | `compose.dev.yaml` | Adds `127.0.0.1:18642` for a local test over plain HTTP. |
+| `compose.syncer.yaml` | A sync node in a container, using the host's BlueZ over D-Bus. |
 | `compose.env.example` | The variables compose needs (host paths, uid, version). |
 | `goarmin.env.example` | goarmin's own settings: public URL, map tiles. |
 
@@ -128,6 +129,25 @@ docker compose --env-file … up -d --build
 ```
 
 Migrations run at start. Take a backup first.
+
+## A sync node in a container
+
+`compose.syncer.yaml` runs `goarmin sync -server` with the host's Bluetooth: BlueZ stays on the
+host, the container reaches it through `/run/dbus/system_bus_socket`. Pair the watch on the host
+first (`goarmin pair` or `bluetoothctl`). Its variables: `GOARMIN_SERVER`, `GOARMIN_NODE_DATA`
+(node.json, the spool, the sign-in), `GOARMIN_UID`/`GOARMIN_GID`, `GOARMIN_ADAPTER`.
+
+```sh
+docker compose --env-file ~/.config/goarmin/node.env -f compose.syncer.yaml run --rm node node login -server "$GOARMIN_SERVER" -email you@example.com
+docker compose --env-file ~/.config/goarmin/node.env -f compose.syncer.yaml up -d --build
+docker compose --env-file ~/.config/goarmin/node.env -f compose.syncer.yaml run --rm node node status
+```
+
+- `goarmin node status` shows whether the container reaches BlueZ.
+- If the host's D-Bus policy refuses the container's user, run it as a user the policy allows
+  (`GOARMIN_UID`), or add a policy file for it.
+- Only one goarmin may use the host's Bluetooth: not a `make node-start` or a server with the sync
+  role beside it.
 
 ## What the build downloads
 

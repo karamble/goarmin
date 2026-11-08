@@ -42,6 +42,12 @@ describe('device lines', () => {
     expect(syncLine(dev(null)).detail).toMatch(/Not paired with this computer/)
     expect(syncLine(dev(null), '', now, false).detail).toMatch(/does not sync watches/)
     expect(syncLine(dev(null, { current: false })).text).toBe('Handed over')
+    // Through a sync node: its name when all is well, offline when it went silent.
+    expect(syncLine(dev({ last_ok: true, last_end: sec(-120_000), node: 'Laptop' }), '', now).detail).toMatch(/via Laptop/)
+    const off = syncLine(dev({ last_ok: true, node: 'Laptop', offline: true, last_seen: sec(-600_000) }), '', now)
+    expect(off.text).toBe('Sync node offline')
+    expect(off.tone).toBe('fail')
+    expect(off.detail).toMatch(/Laptop .*10 min ago/)
   })
 
   it('alerts on real trouble only', () => {

@@ -5,9 +5,10 @@ right credentials, or make goarmin send data where it shouldn't, please report i
 
 ## Reporting
 
-E-mail **hello@decredcommunity.org** with a description and, if you can, the steps to reproduce.
-Please don't open a public issue for a vulnerability. You'll get an answer, and a fix is
-credited to you if you like.
+Use **Report a vulnerability** on the repository's Security tab on GitHub (a private report only
+the maintainers see), with a description and, if you can, the steps to reproduce. Please don't
+open a public issue for a vulnerability. You'll get an answer, and a fix is credited to you if
+you like.
 
 ## What goarmin stores and exposes
 

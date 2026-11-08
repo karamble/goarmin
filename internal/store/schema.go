@@ -756,4 +756,33 @@ CREATE TABLE account_documents (
 );
 CREATE INDEX account_documents_user ON account_documents(user_id, kind);
 `,
+	// 16: sync nodes. A node is a computer that syncs watches near it and uploads their files;
+	// it belongs to the account that signed it in, and its token is kept as a SHA-256 only.
+	`
+CREATE TABLE sync_nodes (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL REFERENCES users(id),
+	name TEXT NOT NULL,
+	hostname TEXT NOT NULL DEFAULT '',
+	token_hash TEXT NOT NULL UNIQUE,
+	created_at INTEGER NOT NULL,
+	last_seen INTEGER NOT NULL DEFAULT 0,
+	version TEXT NOT NULL DEFAULT '',
+	revoked_at INTEGER
+);
+CREATE INDEX sync_nodes_user ON sync_nodes(user_id);
+ALTER TABLE devices ADD COLUMN node_id INTEGER;
+
+CREATE TABLE node_enrollments (
+	code TEXT PRIMARY KEY,                      -- shown on the node, typed in the dashboard
+	poll_hash TEXT NOT NULL UNIQUE,             -- the node polls with this secret
+	name TEXT NOT NULL,
+	hostname TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL,
+	user_id INTEGER,                            -- set once approved
+	node_id INTEGER,                            -- the node made on approval
+	token TEXT                                  -- handed to the node once, then cleared
+);
+`,
 }

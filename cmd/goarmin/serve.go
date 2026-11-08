@@ -20,6 +20,7 @@ import (
 	"github.com/karamble/goarmin/internal/config"
 	"github.com/karamble/goarmin/internal/importer"
 	"github.com/karamble/goarmin/internal/nodehub"
+	"github.com/karamble/goarmin/internal/nodes"
 	"github.com/karamble/goarmin/internal/tiles"
 	"github.com/karamble/goarmin/internal/usbsource"
 	"github.com/karamble/goarmin/internal/webui"
@@ -116,6 +117,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		log.Info("map tiles on", "cache", filepath.Join(*dataDir, "tiles"), "dark", tc.Dark)
 	}
 	hubDone := make(chan struct{})
+	var hub *nodehub.Hub
 	if *withSync {
 		hopt := nodehub.Options{DataDir: *dataDir, Adapter: *adapter, Interval: *interval, In: in, Logger: log,
 			FirstSession: firstSession, Features: features}
@@ -123,14 +125,17 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			hopt = nodehub.Scripted(hopt)
 			log.Warn("scripted Bluetooth (-fake-pairer): made-up watches, no real syncs")
 		}
-		hub := nodehub.New(hopt)
+		hub = nodehub.New(hopt)
 		go func() {
 			hub.Run(ctx)
 			close(hubDone)
 		}()
-		opt.Node = hub
 		log.Info("sync role on", "adapter", *adapter, "interval", *interval)
 	}
+	// The sync role, as the API sees it: this server's hub (with -with-sync) and every sync node
+	// that signs in (goarmin node login, goarmin sync -server).
+	reg := nodes.New(nodes.Options{Local: hub, Logger: log})
+	opt.Node, opt.Nodes = reg, reg
 	var usb *usbsource.Finder
 	switch {
 	case *noUSB:

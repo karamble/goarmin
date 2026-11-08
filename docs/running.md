@@ -11,9 +11,9 @@ computer the watch is paired with. Simplest; the dashboard is at http://localhos
 your network behind a reverse proxy.
 
 **The server elsewhere.** The server runs in a container on a home server ([Docker](#docker)),
-reachable on your private network or behind a reverse proxy with HTTPS. Until the sync node
-exists (planned, M7), the computer near the watch keeps running `make start` with its own data,
-and data moves to the server as a copy ([Moving to a server](#moving-to-a-server)).
+reachable on your private network or behind a reverse proxy with HTTPS. The computer near the
+watch runs a **sync node** ([below](#a-sync-node)): it syncs the watch and hands every file to the
+server. Your data moves to the server once, as a copy ([Moving to a server](#moving-to-a-server)).
 
 ```mermaid
 flowchart LR
@@ -24,9 +24,10 @@ flowchart LR
   end
   subgraph split["Server elsewhere"]
     direction TB
-    w2(["Watch"]) <-->|"Bluetooth"| node["Computer with the watch<br/>(sync role; sync node in M7)"]
+    w2(["Watch"]) <-->|"Bluetooth"| node["Computer with the watch<br/>(goarmin sync -server)"]
     b2(["Browser, phone"]) -->|"HTTP on a private network,<br/>or HTTPS through a proxy"| srv["goarmin serve<br/>(container)"]
-    node -. "M7: uploads to the server" .-> srv
+    node -->|"files, sync log, live values"| srv
+    srv -.->|"commands: sync now, live, …"| node
   end
 ```
 
@@ -46,6 +47,45 @@ flowchart LR
 settings from a `.env` file in the checkout (git-ignored), such as the map tile settings.
 
 goarmin doesn't install itself as a service. After a reboot, `make start` again.
+
+## A sync node
+
+A sync node is a computer near the watch, with the watch paired over Bluetooth, that syncs it for
+a server elsewhere. It needs no database: it keeps the watch's pairing, a spool of fetched files
+and its sign-in in its data directory.
+
+```sh
+make node-login SERVER=http://goarmin.example:8642 EMAIL=you@example.com   # once; asks the password
+make node-start                                                            # syncs every 30 minutes
+make node-status                                                           # server, watches, files waiting
+make node-logs / node-stop / node-restart
+```
+
+- **Sign-in.** The password is asked without echo (or read from standard input with
+  `goarmin node login -password-stdin`) and never kept: the computer gets a token of its own.
+  Without `EMAIL` (an account that signs in with passkeys only) it shows a code to approve under
+  **Devices › Sync nodes**. That tab lists every node with its state and watches, and signs one
+  out at once.
+- **Files reach the server first.** The node hands each file to the server right after fetching
+  it, and the watch flags a file as synced only once the server has it. While the server is away,
+  syncs go on: files wait in the node's spool and on the watch, and the next sync after the
+  server is back hands them over and flags them.
+- **The dashboard works as usual.** Sync now, live values, the files list, unpair, a node's
+  offline state: the server sends commands to the node, which answers within a second or two.
+- **Whose watches.** A node syncs the watches of the account that signed it in (an admin's node:
+  everyone's). Files go to the account that owned the watch when they were recorded, as always.
+- **Daily syncs only.** Accounts, settings and history live on the server; the node never
+  carries them. To move existing data, copy it once ([Moving to a server](#moving-to-a-server)).
+- **One host per watch.** Only one goarmin may sync a watch: `make node-start` refuses while a
+  local server with the sync role runs. `NODE_ARGS=-no-archive` keeps every file on the watch,
+  for a trial run.
+- **Not a service.** After a reboot, `make node-start` again. `NODE_SERVER` in `.env` saves
+  typing `SERVER=` each time.
+- In a container: `docker/compose.syncer.yaml` ([docker/README.md](../docker/README.md)).
+
+Adding a new watch (the pairing wizard) still runs where the server has the sync role itself. With
+only sync nodes, pair the watch on the node's computer (`goarmin pair`); it appears on the server
+with its first sync.
 
 ## Docker
 
@@ -159,8 +199,8 @@ The copy is exact: accounts, settings, devices and their owners, history.
    Leave out `watches/` and `node.json`: they belong to the computer that syncs the watch.
 3. Start it, sign in with your password, add a passkey for the new address.
 
-From then on the two copies differ until the sync node (M7) lets the watch's computer feed the
-server.
+Then sign the watch's computer in as a [sync node](#a-sync-node) and stop its own server: from
+then on the node feeds the server.
 
 ## Monitoring
 

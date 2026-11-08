@@ -38,8 +38,12 @@ type Pairing interface {
 // pairer returns the sync role's pairing, or answers 503.
 func (s *Server) pairer(w http.ResponseWriter) (Pairing, bool) {
 	p, ok := s.opt.Node.(Pairing)
-	if s.opt.Node == nil || !ok {
+	if s.node() == nil || !ok {
 		writeError(w, http.StatusServiceUnavailable, "this server does not sync watches (goarmin serve --with-sync)")
+		return nil, false
+	}
+	if cp, ok := s.opt.Node.(interface{ CanPair() bool }); ok && !cp.CanPair() {
+		writeError(w, http.StatusServiceUnavailable, "Add a watch runs on the computer the watch pairs with (goarmin serve -with-sync there)")
 		return nil, false
 	}
 	return p, true

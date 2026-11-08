@@ -157,6 +157,38 @@ then.
 - A watch nobody ever owned goes to the only account of a single-person server. On a shared
   server it waits, and its syncs fail with "nobody owns this watch now", until someone adds it.
 
+## Sync nodes
+
+A sync node is a computer that syncs the watches near it for this server (`goarmin sync
+-server`). The dashboard manages them; the routes it uses:
+
+| Route | |
+|---|---|
+| `GET /api/nodes` | your nodes (every node for an admin): `{id, name, hostname, user_id, created_at, last_seen, version, revoked, online, adapter: {name, powered, power_state, busy}?, watches: [{address, unit, product, name, firmware}]}` |
+| `PATCH /api/nodes/{id}` `{name}` | renames a node |
+| `DELETE /api/nodes/{id}` | signs it out: its token stops working at once (204) |
+| `POST /api/nodes/approve` `{code}` | approves the code a node shows after `goarmin node login` without an e-mail; the node is then the signed-in account's |
+
+A watch synced by a node carries `node` (its name), `offline` and `last_seen` in its `sync`
+status; a sync request for a watch whose node is offline answers 503 with when it was last heard
+from. `GET /api/me`'s `server.sync` is true once a node has been heard from; `server.pair` tells
+whether *Add a watch* works here (only where the server pairs watches itself).
+
+**The node API** (`/api/node/v1`, `internal/nodeproto`) is what nodes speak; they authenticate
+with their token as `Authorization: Bearer`:
+
+| Route | |
+|---|---|
+| `POST /login` `{email, password, name, hostname}` | signs a node in with the account's password (the sign-in limits apply) → `{node_id, token, account}` |
+| `POST /enroll` `{name, hostname}` → `{code, poll, expires}`; `GET /enroll/{poll}` | a code approval: 202 while it waits, then `{token}` once |
+| `POST /hello` `{version, hostname, adapter, watches}` | the node's paired watches → per watch `{device_id, sync, reason?, owner, after_fetch, paused, zone}`; `sync` is false for a watch nobody owns (`no_owner`) or another account's (`other_account`) |
+| `PUT /files/{sha256}` (`X-Goarmin-Unit`, `X-Goarmin-Name`) | one pulled file: 200 once stored and ingested (also when it was there already), 403 for a watch the node may not sync, 409 for a wrong hash or a file recorded while nobody owned the watch |
+| `POST /stored` `{unit, uids}` | which of a watch's items the server holds (deleting from the watch after the spool copy is gone) |
+| `POST /runs`, `GET /history?unit=` | a finished sync (with battery and delete support); the last runs, for a node that starts |
+| `POST /progress` | the node's status per watch, its Bluetooth and who holds it |
+| `GET /commands` (long poll, 25 s), `POST /commands/{id}` | commands (`sync`, `live_start`, `live_stop`, `files`, `forget`, `purge`, `power_on`, `hello`) and their results |
+| `POST /live` | a live link's readings, a batch a second, and how it ended |
+
 ## Adding a watch (pairing)
 
 With `--with-sync` the server pairs watches itself, driven by the dashboard's *Add a watch*. One

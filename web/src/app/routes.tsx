@@ -2,6 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
+import { canPair } from '../lib/devices'
 import {
   Activity, HeartPulse, LayoutGrid, Radio, Settings, Watch, type LucideIcon,
 } from 'lucide-react'
@@ -19,7 +20,7 @@ export interface PageDef {
   periods?: Period[]
   /** The period when the URL names none (default: the first of periods). */
   defaultPeriod?: Period
-  requires?: 'sync' | 'admin'
+  requires?: 'sync' | 'pair' | 'admin'
   load: () => Promise<{ default: ComponentType }>
   /** A page for one item under it (`path/:id`), e.g. a watch under Watches. */
   detail?: () => Promise<{ default: ComponentType }>
@@ -32,7 +33,7 @@ export interface SectionDef {
   path: string
   label: string
   icon: LucideIcon
-  requires?: 'sync' | 'admin'
+  requires?: 'sync' | 'pair' | 'admin'
   /** Sub-sections shown as the tab strip; a section without pages renders `load` itself. */
   pages: PageDef[]
   load?: () => Promise<{ default: ComponentType }>
@@ -82,7 +83,8 @@ export const sections: SectionDef[] = [
       { path: 'log', label: 'Sync log', load: () => import('../pages/devices/SyncLog') },
       { path: 'import', label: 'Import', load: () => import('../pages/devices/Import') },
       { path: 'files', label: 'Files', load: () => import('../pages/devices/Files'), detail: () => import('../pages/devices/FileInspector') },
-      { path: 'add', label: 'Add a watch', requires: 'sync', hidden: true, load: () => import('../pages/devices/add/AddWatch') },
+      { path: 'nodes', label: 'Sync nodes', load: () => import('../pages/devices/Nodes') },
+      { path: 'add', label: 'Add a watch', requires: 'pair', hidden: true, load: () => import('../pages/devices/add/AddWatch') },
     ],
   },
   {
@@ -98,8 +100,9 @@ export const sections: SectionDef[] = [
 
 
 /** allowed tells whether the signed-in account may see a section or page. */
-export function allowed(req: 'sync' | 'admin' | undefined, me: Me): boolean {
+export function allowed(req: 'sync' | 'pair' | 'admin' | undefined, me: Me): boolean {
   if (req === 'sync') return me.server.sync
+  if (req === 'pair') return canPair(me)
   if (req === 'admin') return me.is_admin
   return true
 }

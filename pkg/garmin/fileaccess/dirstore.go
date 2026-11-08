@@ -258,6 +258,37 @@ func (s *DirStore) Stored(uid smart.UUID) bool {
 	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
 }
 
+// File returns the stored file of uid, pending or finished, as Files lists it; ok is false
+// when the store has no record of a file for it. The file may be gone from disk since (a spool
+// removes a file once the server has it): check before reading it.
+func (s *DirStore) File(uid smart.UUID) (StoredFile, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := uid.String()
+	var d dirItem
+	path := ""
+	var o Outcome
+	var at int64
+	if i := slices.IndexFunc(s.st.Pending, func(p dirPending) bool { return p.UID == key }); i >= 0 {
+		d, path = s.st.Pending[i].dirItem, s.st.Pending[i].Path
+	} else if r, ok := s.st.Done[key]; ok {
+		d, path, at = r.dirItem, r.Path, r.At
+		o = map[string]Outcome{"archived": Archived, "kept": Kept, "gone": Gone, "deleted": Deleted}[r.Outcome]
+	}
+	if path == "" {
+		return StoredFile{}, false
+	}
+	it, err := d.item()
+	if err != nil {
+		return StoredFile{}, false
+	}
+	f := StoredFile{Item: it, Path: filepath.Join(s.dir, path), Outcome: o}
+	if at != 0 {
+		f.At = time.Unix(at, 0)
+	}
+	return f, true
+}
+
 // Files lists every stored file, finished or still waiting to be archived.
 func (s *DirStore) Files() ([]StoredFile, error) {
 	s.mu.Lock()

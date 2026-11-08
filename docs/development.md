@@ -55,6 +55,8 @@ make check         # gofmt, go vet, Go tests, the dashboard's type check and tes
   training values and a coach plan. It refuses the default data directory.
 - **No Bluetooth.** `goarmin serve -with-sync -fake-pairer -data DIR` scripts two made-up
   watches for trying *Add a watch* (scratch data only).
+- **A node against a server.** `internal/nodeclient`'s end-to-end test runs a real server
+  (httptest) and a node syncing the fake watch, with the server refusing uploads for a while.
 - **The fake watch.** `pkg/garmin/fakewatch` answers the protocol in tests: handshake, listing,
   file pipes, MLR with loss injection, live values, battery. The sync, live and pairing tests
   run against it.
@@ -107,8 +109,12 @@ internal/
   store/           SQLite schema, migrations, queries, writers
   ingest/          FIT and export files → rows; the ordered parallel pipeline
   importer/        background imports, USB watcher
-  nodehub/         the sync role: schedule, Bluetooth lane, live links, pairing sessions
+  nodehub/         the sync role: schedule, Bluetooth lane, live links, pairing sessions;
+                   its Backend (Local: this server's database)
   syncnode/        one sync, the spool, pairing and identifying a watch
+  nodes/           the server's sync nodes: who syncs which watch, commands, live relay
+  nodeclient/      a sync node: sign-in, the Remote backend, the daemon (goarmin sync -server)
+  nodeproto/       what a node and the server send each other
   backup/          backup archives
   guard/           repository-wide checks (no fixed dates in tests, no raw HTTP clients, …)
   tiles/, webui/, usbsource/, config/

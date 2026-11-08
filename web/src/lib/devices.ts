@@ -2,7 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import type { Device, DeviceKind } from '../api/types'
+import type { Device, DeviceKind, Me } from '../api/types'
 import { ago, timeOfDay } from './format'
 import { fitTypeTitles } from './fitTypes.gen'
 
@@ -89,6 +89,11 @@ export function subtitle(d: Pick<Device, 'nickname' | 'model' | 'name' | 'unit_i
 
 /** syncLine is a watch's state in one line, with its tone (the dot's colour). serverSyncs says
  * whether this server syncs watches over Bluetooth at all. */
+/** canPair: Add a watch works on this server (it pairs watches itself, not only through a sync node). */
+export function canPair(me: Me): boolean {
+  return me.server.pair ?? me.server.sync
+}
+
 export function syncLine(d: Device, tz = '', now = Date.now(), serverSyncs = true): { text: string; detail: string; tone: Tone } {
   const s = d.sync
   if (!d.current) return { text: 'Handed over', detail: '', tone: 'idle' }
@@ -109,6 +114,10 @@ export function syncLine(d: Device, tz = '', now = Date.now(), serverSyncs = tru
     }
   }
   const next = s.next_sync ? `next ${timeOfDay(s.next_sync, tz)}` : ''
+  if (s.offline) {
+    const seen = s.last_seen ? `, last heard from ${ago(s.last_seen, now)}` : ''
+    return { text: 'Sync node offline', detail: `${s.node ?? 'The computer that syncs this watch'} is not running or not reachable${seen}. The watch keeps its files until it is back.`, tone: 'fail' }
+  }
   if (s.running) {
     const phase = s.phase === 'listing' ? 'Reading the file list…'
       : s.phase === 'fetching' && s.total > 0 ? `Fetching ${s.done} of ${s.total} files`
@@ -123,7 +132,7 @@ export function syncLine(d: Device, tz = '', now = Date.now(), serverSyncs = tru
   if (s.failures > 0) {
     return { text: `Sync failed${s.failures > 1 ? ` ${s.failures}× in a row` : ''}`, detail: [errorHint(s.error_code), next].filter(Boolean).join(' '), tone: 'fail' }
   }
-  if (s.last_ok && s.last_end) return { text: `Synced ${ago(s.last_end, now)}`, detail: next, tone: 'ok' }
+  if (s.last_ok && s.last_end) return { text: `Synced ${ago(s.last_end, now)}`, detail: [next, s.node ? `via ${s.node}` : ''].filter(Boolean).join(' · '), tone: 'ok' }
   if (s.error_code === 'no_owner') return { text: 'Waiting for an owner', detail: errorHint('no_owner'), tone: 'idle' }
   return { text: 'Not synced yet', detail: next, tone: 'idle' }
 }

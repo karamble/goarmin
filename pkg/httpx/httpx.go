@@ -23,6 +23,12 @@ func NewClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: Transport(nil)}
 }
 
+// NewClientOn is NewClient over base (e.g. a transport with its own dial timeout), still always
+// carrying BrowserUA.
+func NewClientOn(timeout time.Duration, base http.RoundTripper) *http.Client {
+	return &http.Client{Timeout: timeout, Transport: Transport(base)}
+}
+
 // Transport wraps base (http.DefaultTransport when nil) so that every request carries
 // BrowserUA, replacing any User-Agent the caller or a library set.
 func Transport(base http.RoundTripper) http.RoundTripper {

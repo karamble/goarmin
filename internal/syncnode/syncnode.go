@@ -71,6 +71,12 @@ type Options struct {
 	// (smart.GarminConnectFeatures: wellness threshold notifications, file access, device
 	// status) right after the handshake's CONFIGURATION.
 	Features bool
+	// Hand, if set, gives each pulled file to the server right after the spool has it (a sync
+	// node). The watch flags a file as synced only once Hand returned nil for it, and its spool
+	// copy is removed then. A file Hand could not give stays pending, in the spool and on the
+	// watch; a later sync gives it again before it flags it. Without Hand, a file is flagged as
+	// soon as the spool has it on disk, and the caller imports the spool afterwards.
+	Hand func(ctx context.Context, f fileaccess.StoredFile) error
 }
 
 // Result describes a finished sync.
@@ -298,7 +304,13 @@ func syncWith(ctx context.Context, opt Options, addr string, open watch.Opener, 
 	if opt.DeleteActivities {
 		fopt.Delete = IsActivity
 	}
-	eng := fileaccess.New(conn, store, fopt)
+	var sink fileaccess.Store = store
+	if opt.Hand != nil {
+		h := &handing{DirStore: store, ctx: ctx, hand: opt.Hand, stored: opt.IsStored, log: opt.Logger,
+			handed: map[string]bool{}, tried: map[string]bool{}}
+		sink, fopt.ArchiveAllowed = h, h.allowed
+	}
+	eng := fileaccess.New(conn, sink, fopt)
 	defer eng.Close()
 	syncStart := time.Now()
 	res.Report, err = eng.Sync(ctx)
@@ -381,6 +393,70 @@ func Save(dataDir, addr string, rec WatchRecord) error {
 		n.Watches[addr] = rec
 		return true
 	})
+}
+
+// handing is a spool that gives each pulled file to the server (Options.Hand) and allows the
+// watch to flag only the files the server has.
+type handing struct {
+	*fileaccess.DirStore
+	ctx    context.Context
+	hand   func(context.Context, fileaccess.StoredFile) error
+	stored func(uid string) bool
+	log    *slog.Logger
+	handed map[string]bool // given in this sync (the engine runs items one at a time)
+	tried  map[string]bool // asked once in this sync: a refused file waits for the next sync
+}
+
+// Persist stores the file, then gives it to the server; a failed hand only leaves the file
+// pending, it never fails the pull.
+func (h *handing) Persist(ctx context.Context, it fileaccess.Item, data []byte) error {
+	if err := h.DirStore.Persist(ctx, it, data); err != nil {
+		return err
+	}
+	h.give(it.UID)
+	return nil
+}
+
+// give hands the spool's file of uid to the server and removes the spool copy once it did.
+func (h *handing) give(uid smart.UUID) bool {
+	key := uid.String()
+	if h.handed[key] {
+		return true
+	}
+	if h.tried[key] {
+		return false
+	}
+	h.tried[key] = true
+	f, ok := h.File(uid)
+	if !ok {
+		return false
+	}
+	if _, err := os.Stat(f.Path); err != nil {
+		return false
+	}
+	if err := h.hand(h.ctx, f); err != nil {
+		h.log.Info("syncnode: the server does not have the file yet; it stays on the watch", "uid", key, "err", err)
+		return false
+	}
+	h.handed[key] = true
+	if err := os.Remove(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		h.log.Warn("syncnode: removing a handed file from the spool", "path", f.Path, "err", err)
+	}
+	return true
+}
+
+// allowed is the engine's ArchiveAllowed: the server has the file, given now or before (a
+// spool copy is only removed once the server has it, which IsStored confirms).
+func (h *handing) allowed(it fileaccess.Item) bool {
+	if h.give(it.UID) {
+		return true
+	}
+	if f, ok := h.File(it.UID); ok {
+		if _, err := os.Stat(f.Path); err == nil {
+			return false // still in the spool: the server did not take it
+		}
+	}
+	return h.stored != nil && h.stored(it.UID.String())
 }
 
 // IsActivity picks FIT activity files (FIT_TYPE_4).

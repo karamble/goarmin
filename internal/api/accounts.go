@@ -33,7 +33,8 @@ func toUserJSON(u store.User) userJSON {
 // serverJSON tells the dashboard what this server can do.
 type serverJSON struct {
 	Version string `json:"version"`
-	Sync    bool   `json:"sync"`  // the in-process sync role: live view, sync now, pairing
+	Sync    bool   `json:"sync"`  // something syncs watches: this server, or a sync node (live view, sync now)
+	Pair    bool   `json:"pair"`  // Add a watch works here (the in-process sync role pairs)
 	Tiles   bool   `json:"tiles"` // map tiles under /tiles
 	// Map says how to show the tiles: dark already, and the credit (only with tiles).
 	Map *mapJSON `json:"map,omitempty"`
@@ -327,7 +328,13 @@ type mapJSON struct {
 
 // serverInfo is what the dashboard needs to know about this server.
 func (s *Server) serverInfo() serverJSON {
-	out := serverJSON{Version: s.opt.Version, Sync: s.opt.Node != nil, Tiles: s.opt.Tiles != nil}
+	out := serverJSON{Version: s.opt.Version, Sync: s.node() != nil, Tiles: s.opt.Tiles != nil}
+	if _, ok := s.opt.Node.(Pairing); ok && out.Sync {
+		out.Pair = true
+		if cp, ok := s.opt.Node.(interface{ CanPair() bool }); ok {
+			out.Pair = cp.CanPair()
+		}
+	}
 	if out.Tiles {
 		out.Map = &mapJSON{Dark: s.opt.TilesDark, Attribution: s.opt.TilesAttribution}
 	}

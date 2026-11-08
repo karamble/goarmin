@@ -16,7 +16,7 @@ describe('routes', () => {
   it('hides the sync-only and admin-only parts', () => {
     const plain = visibleSections(me())
     expect(plain.find((s) => s.id === 'live')).toBeUndefined()
-    expect(plain.find((s) => s.id === 'devices')?.pages.map((p) => p.path)).toEqual(['watches', 'log', 'import', 'files'])
+    expect(plain.find((s) => s.id === 'devices')?.pages.map((p) => p.path)).toEqual(['watches', 'log', 'import', 'files', 'nodes'])
     expect(plain.find((s) => s.id === 'settings')?.pages.map((p) => p.path)).not.toContain('admin')
     const full = visibleSections(me({ is_admin: true, server: { version: 'dev', sync: true, tiles: true } }))
     expect(full.find((s) => s.id === 'live')).toBeDefined()
@@ -27,15 +27,21 @@ describe('routes', () => {
     expect(findPage('/health/hrv/').page?.label).toBe('HRV')
     expect(findPage('/nowhere').section).toBeUndefined()
   })
-  it('routes Add a watch as a page outside the tab strip, only with the sync role', async () => {
+  it('routes Add a watch as a page outside the tab strip, only where this server pairs', async () => {
     const add = findPage('/devices/add').page
     expect(add?.label).toBe('Add a watch')
     expect(add?.hidden).toBe(true)
-    expect(add?.requires).toBe('sync')
+    expect(add?.requires).toBe('pair')
     const mod = await add!.load()
     expect(mod.default.name).toBe('AddWatch')
-    const withSync = visibleSections(me({ server: { version: 'dev', sync: true, tiles: false } }))
-    expect(withSync.find((s) => s.id === 'devices')?.pages.filter((p) => !p.hidden).map((p) => p.path)).toEqual(['watches', 'log', 'import', 'files'])
+    const withSync = visibleSections(me({ server: { version: 'dev', sync: true, pair: true, tiles: false } }))
+    const devices = withSync.find((s) => s.id === 'devices')?.pages ?? []
+    expect(devices.filter((p) => !p.hidden).map((p) => p.path)).toEqual(['watches', 'log', 'import', 'files', 'nodes'])
+    expect(devices.map((p) => p.path)).toContain('add')
+    // Synced through a sync node only: live and sync now, but no Add a watch here.
+    const viaNode = visibleSections(me({ server: { version: 'dev', sync: true, pair: false, tiles: false } }))
+    expect(viaNode.find((s) => s.id === 'live')).toBeDefined()
+    expect(viaNode.find((s) => s.id === 'devices')?.pages.map((p) => p.path)).not.toContain('add')
   })
   it('has unique ids and paths', () => {
     expect(new Set(sections.map((s) => s.id)).size).toBe(sections.length)

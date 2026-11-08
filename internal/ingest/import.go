@@ -185,47 +185,77 @@ func (in *Ingester) ImportWatch(ctx context.Context, dev store.Device, source, d
 			return nil
 		}
 		rep.Seen++
-		fail := func(err error) error {
+		b, err := readFile(p)
+		if err != nil {
 			rep.Failed++
 			rep.addError(p + ": " + err.Error())
 			return nil
 		}
-		b, err := readFile(p)
-		if err != nil {
-			return fail(err)
-		}
-		info, ierr := fitid.Inspect(b)
 		at := time.Now()
 		if fi, err := d.Info(); err == nil {
 			at = fi.ModTime()
 		}
-		if ierr == nil {
-			at = time.Unix(recorded(info, at), 0)
-		}
-		owner, err := in.Store.Owner(ctx, dev.ID, at.Unix())
-		if errors.Is(err, store.ErrNotFound) {
-			rep.Waiting++
+		stored, err := in.importWatchBytes(ctx, dev, source, filepath.Base(p), b, at, users, &rep)
+		if err != nil {
+			rep.Failed++
+			rep.addError(p + ": " + err.Error())
 			return nil
 		}
-		if err != nil {
-			return fail(err)
-		}
-		u, ok := users[owner]
-		if !ok {
-			if u, err = in.Store.User(ctx, owner); err != nil {
-				return fail(err)
+		if stored {
+			if err := os.Remove(p); err != nil {
+				in.log().Warn("ingest: removing an imported file from the spool", "file", p, "err", err)
 			}
-			users[owner] = u
-		}
-		if _, err := in.store(ctx, u, dev.ID, source, filepath.Base(p), &prepared{b: b, info: info, ierr: ierr}, &rep); err != nil {
-			return fail(err)
-		}
-		if err := os.Remove(p); err != nil {
-			in.log().Warn("ingest: removing an imported file from the spool", "file", p, "err", err)
 		}
 		return nil
 	})
 	return rep, errors.Join(err, in.finish(ctx, &rep))
+}
+
+// ErrWaiting is ImportWatchFile's error for a file recorded while nobody owned the watch: it
+// waits on the sync node until someone adds the watch.
+var ErrWaiting = errors.New("nobody owned the watch when this file was recorded")
+
+// ImportWatchFile stores and ingests one file a sync node pulled from dev, into the account that
+// owned dev when the file was recorded, and rebuilds the days it touched. A file recorded while
+// nobody owned the watch is ErrWaiting.
+func (in *Ingester) ImportWatchFile(ctx context.Context, dev store.Device, source, name string, b []byte) (Report, error) {
+	var rep Report
+	rep.Seen++
+	stored, err := in.importWatchBytes(ctx, dev, source, name, b, time.Now(), map[int64]store.User{}, &rep)
+	if err == nil && !stored {
+		err = ErrWaiting
+	}
+	return rep, errors.Join(err, in.finish(ctx, &rep))
+}
+
+// importWatchBytes stores one file of dev for the account that owned it when the file was
+// recorded (at, if the file does not say). stored is false, without an error, when nobody owned
+// the watch then.
+func (in *Ingester) importWatchBytes(ctx context.Context, dev store.Device, source, name string, b []byte, at time.Time,
+	users map[int64]store.User, rep *Report) (bool, error) {
+	info, ierr := fitid.Inspect(b)
+	if ierr == nil {
+		at = time.Unix(recorded(info, at), 0)
+	}
+	owner, err := in.Store.Owner(ctx, dev.ID, at.Unix())
+	if errors.Is(err, store.ErrNotFound) {
+		rep.Waiting++
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	u, ok := users[owner]
+	if !ok {
+		if u, err = in.Store.User(ctx, owner); err != nil {
+			return false, err
+		}
+		users[owner] = u
+	}
+	if _, err := in.store(ctx, u, dev.ID, source, name, &prepared{b: b, info: info, ierr: ierr}, rep); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // store records one file's bytes for user (linked to device, if not 0) and ingests it; p.dec,

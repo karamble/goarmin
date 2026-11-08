@@ -38,6 +38,10 @@ type Options struct {
 	// NoArchive never flags items as synced. Items that would be archived stay pending,
 	// stored, and are archived by the first run without NoArchive.
 	NoArchive bool
+	// ArchiveAllowed, if set, is asked before each archive; false defers the item like
+	// NoArchive does (it stays pending and stored, and a later run asks again without pulling it
+	// again). A sync node uses it to flag a file only once the server has it.
+	ArchiveAllowed func(Item) bool
 	// Priority is the transfer priority sent with pulls (24, Garmin Connect's value).
 	Priority uint32
 	// CompressionWindow is the zlib window requested (15; the Fenix 8 answers 11).
@@ -118,7 +122,7 @@ type Report struct {
 	Pulled   int
 	Archived int
 	Kept     int // stored and finished without archiving (PullOnce)
-	Deferred int // stored, archive skipped because of NoArchive
+	Deferred int // stored, archive skipped because of NoArchive or ArchiveAllowed
 	Gone     int
 	Failed   int
 	Deleted  int // archived, then deleted from the watch (Options.Delete)
@@ -509,7 +513,7 @@ func (e *Engine) process(ctx context.Context, p PendingItem, act Action, rep *Re
 		e.event(EventPulled, it, len(data), nil)
 	}
 	switch {
-	case act == PullArchive && e.opt.NoArchive:
+	case act == PullArchive && (e.opt.NoArchive || (e.opt.ArchiveAllowed != nil && !e.opt.ArchiveAllowed(it))):
 		rep.Deferred++
 		e.event(EventDeferred, it, 0, nil)
 		return nil

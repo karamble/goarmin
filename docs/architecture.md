@@ -16,8 +16,8 @@ stores data, and how the API and the dashboard sit on top. For running it see
 
 The sync role needs the computer the watch is paired with: Bluetooth bonds live in BlueZ on
 that machine. The server alone can run anywhere, for example in a container
-([docker/README.md](../docker/README.md)). A separate sync node that uploads to a remote server
-is planned (milestone M7); until then the server and the sync role run in one process.
+([docker/README.md](../docker/README.md)), while a **sync node** (`goarmin sync -server`) syncs
+the watch on the computer near it and hands the files to the server ([below](#sync-nodes)).
 
 ```mermaid
 flowchart LR
@@ -161,6 +161,53 @@ stateDiagram-v2
   canceled --> [*]
   expired --> [*]
 ```
+
+## Sync nodes
+
+A sync node runs the same hub as `serve -with-sync` (schedule, Bluetooth lane, live links); only
+where the hub keeps things differs. The hub talks to a **Backend**:
+
+- `nodehub.Local` in the server: the database and ingest, in-process.
+- `nodeclient.Remote` on a node: the server over HTTP (`internal/nodeproto`, routes under
+  `/api/node/v1`, the node's token as Bearer). It caches the server's config for each watch, so
+  syncs go on while the server is away.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Watch
+  participant Node as Sync node (hub, Remote)
+  participant Server as Server (node API, registry)
+  participant UI as Dashboard
+  Node->>Server: hello (watches, adapter) → each watch's config
+  loop each pulled file
+    Watch-->>Node: file over a pipe, into the spool
+    Node->>Server: PUT /files/{sha256}
+    Server-->>Node: 200 (stored and ingested)
+    Node->>Watch: flag as synced (only now)
+  end
+  Node->>Server: POST /runs (the sync log), POST /progress
+  UI->>Server: Sync now / Live
+  Server-->>Node: command (long poll)
+  Node-->>Server: result, live readings each second
+```
+
+- **Archive after the server's answer.** `syncnode.Options.Hand` gives each file to the server
+  right after the spool has it; the file-access engine flags a file only when
+  `ArchiveAllowed` says the server took it. A file the server didn't take stays pending in the
+  spool and on the watch. The next sync hands it over first and then flags it, without pulling it
+  again.
+- **The registry** (`internal/nodes`) is the API's sync role. It knows which node syncs which
+  watch, keeps what each reported (status, Bluetooth), queues commands (sync now, live, the file
+  list, unpair, purge, power on) and relays live readings with the same 10-minute replay. The
+  in-process hub of `serve -with-sync` is one more member. A node silent for 75 s is offline, and
+  the dashboard says so.
+- **Uploads** go through the same import as a sync's spool (`ingest.ImportWatchFile`): the
+  account that owned the watch at recording time, dedupe by content. A node may upload only for
+  watches its account owns now (any watch for an admin's node).
+- **Sign-in.** `goarmin node login` with the account's password, or a code approved in the
+  dashboard, gives the node a token (stored as SHA-256 in `sync_nodes`); signing a node out
+  revokes it at once.
 
 ## Imports
 

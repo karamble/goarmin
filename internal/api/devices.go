@@ -42,6 +42,18 @@ type Node interface {
 	PurgeSpool(unit uint32) error
 }
 
+// node returns the sync role, or nil when nothing syncs watches here: no in-process hub and no
+// sync node heard from.
+func (s *Server) node() Node {
+	if s.opt.Node == nil {
+		return nil
+	}
+	if a, ok := s.opt.Node.(interface{ Available() bool }); ok && !a.Available() {
+		return nil
+	}
+	return s.opt.Node
+}
+
 // unix is t in Unix seconds, nil for the zero time.
 func unix(t time.Time) *int64 {
 	if t.IsZero() {
@@ -72,13 +84,19 @@ type syncStatusJSON struct {
 	Listed    int    `json:"listed"`
 	Done      int    `json:"done"`
 	Total     int    `json:"total"`
+	// Node names the sync node that syncs the watch (absent: this server); Offline says it has
+	// not been heard from since LastSeen.
+	Node     string `json:"node,omitempty"`
+	Offline  bool   `json:"offline,omitempty"`
+	LastSeen *int64 `json:"last_seen,omitempty"`
 }
 
 func toSyncStatusJSON(st nodehub.Status) syncStatusJSON {
 	return syncStatusJSON{Address: st.Address, Running: st.Running, Live: st.Live, LastStart: unix(st.LastStart),
 		LastEnd: unix(st.LastEnd), LastOK: st.LastOK, LastGood: unix(st.LastGood), LastError: st.LastError, ErrorCode: st.ErrorCode, Pulled: st.Pulled,
 		Imported: st.Imported, NextSync: unix(st.NextSync), Failures: st.Failures, Away: st.Away,
-		AwaySince: unix(st.AwaySince), Phase: st.Phase, Listed: st.Listed, Done: st.Done, Total: st.Total}
+		AwaySince: unix(st.AwaySince), Phase: st.Phase, Listed: st.Listed, Done: st.Done, Total: st.Total,
+		Node: st.Node, Offline: st.Offline, LastSeen: unix(st.LastSeen)}
 }
 
 // kindOf is d's kind for the API: a device not classified yet counts as a watch.
@@ -101,7 +119,7 @@ func (s *Server) deviceJSON(d store.Device) map[string]any {
 	if d.OwnedTo != 0 {
 		m["owned_to"] = d.OwnedTo
 	}
-	if s.opt.Node != nil && d.Address != "" {
+	if s.node() != nil && d.Address != "" {
 		known := s.opt.Node.Known(d.Address)
 		m["paired"] = known
 		if known && d.Current {
@@ -221,7 +239,7 @@ func notWatch(w http.ResponseWriter, d store.Device) bool {
 
 // noNode answers routes that need the sync role on a server without it.
 func (s *Server) noNode(w http.ResponseWriter, d store.Device) bool {
-	if s.opt.Node == nil || d.Address == "" {
+	if s.node() == nil || d.Address == "" {
 		writeError(w, http.StatusServiceUnavailable, "this server has no sync node for the watch (goarmin serve --with-sync)")
 		return true
 	}
@@ -300,7 +318,7 @@ func (s *Server) watchFiles(w http.ResponseWriter, r *http.Request, u store.User
 		return
 	}
 	out := []watchFileJSON{}
-	if s.opt.Node == nil {
+	if s.node() == nil {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
@@ -438,7 +456,7 @@ func syncRunJSON(x store.SyncRun) map[string]any {
 
 // bluetooth reports this computer's adapter for the Devices page.
 func (s *Server) bluetooth(w http.ResponseWriter, r *http.Request, _ store.User) {
-	if s.opt.Node == nil {
+	if s.node() == nil {
 		writeError(w, http.StatusServiceUnavailable, "this server does not sync watches (goarmin serve --with-sync)")
 		return
 	}
@@ -471,7 +489,7 @@ func (s *Server) bluetoothPower(w http.ResponseWriter, r *http.Request, u store.
 		writeError(w, http.StatusBadRequest, "goarmin only switches Bluetooth on")
 		return
 	}
-	if s.opt.Node == nil {
+	if s.node() == nil {
 		writeError(w, http.StatusServiceUnavailable, "this server does not sync watches (goarmin serve --with-sync)")
 		return
 	}
@@ -512,7 +530,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request, u store.User) {
 	if !ok || notWatch(w, d) {
 		return
 	}
-	if s.opt.Node == nil || d.Address == "" {
+	if s.node() == nil || d.Address == "" {
 		writeError(w, http.StatusServiceUnavailable, "this server has no sync node for the watch (goarmin serve --with-sync)")
 		return
 	}
@@ -609,7 +627,7 @@ func writeBusy(w http.ResponseWriter, err error) {
 // exclusive runs fn with Bluetooth held when this server syncs watches (so no sync sees the
 // change half done), else at once.
 func (s *Server) exclusive(r *http.Request, kind string, fn func() error) error {
-	if s.opt.Node == nil {
+	if s.node() == nil {
 		return fn()
 	}
 	return s.opt.Node.Exclusive(r.Context(), kind, fn)
@@ -662,7 +680,7 @@ func (s *Server) release(r *http.Request, d store.Device, owner int64, unpair bo
 		if err := s.st.ReleaseDevice(r.Context(), d.ID, owner); err != nil {
 			return err
 		}
-		if s.opt.Node == nil {
+		if s.node() == nil {
 			return nil
 		}
 		if err := s.opt.Node.PurgeSpool(d.UnitID); err != nil {
@@ -710,7 +728,7 @@ func (s *Server) deleteDeviceData(w http.ResponseWriter, r *http.Request, u stor
 		if gone, err = in.DeleteDeviceData(r.Context(), u.ID, d.ID); err != nil {
 			return err
 		}
-		if s.opt.Node != nil && d.Current {
+		if s.node() != nil && d.Current {
 			return s.opt.Node.PurgeSpool(d.UnitID)
 		}
 		return nil
@@ -781,7 +799,7 @@ func (s *Server) adminDevices(w http.ResponseWriter, r *http.Request, _ store.Us
 		if x.OwnerID != 0 {
 			m["owner"] = map[string]any{"id": x.OwnerID, "email": x.OwnerEmail, "name": x.OwnerName}
 		}
-		if s.opt.Node != nil && x.Address != "" {
+		if s.node() != nil && x.Address != "" {
 			m["paired"] = s.opt.Node.Known(x.Address)
 			if st := s.opt.Node.Status(x.Address); !st.LastStart.IsZero() {
 				m["last_end"], m["last_ok"], m["away"] = unix(st.LastEnd), st.LastOK, st.Away

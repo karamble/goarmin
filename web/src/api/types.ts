@@ -4,7 +4,10 @@
 
 export interface ServerInfo {
   version: string
+  /** Something syncs watches: this server, or a sync node (live view, sync now). */
   sync: boolean
+  /** Add a watch works here (this server pairs watches itself). */
+  pair?: boolean
   tiles: boolean
   /** How to show the map tiles (only with tiles): dark already, and the credit (HTML). */
   map?: { dark: boolean; attribution: string }
@@ -423,6 +426,25 @@ export interface SyncStatus {
   listed: number
   done: number
   total: number
+  /** The sync node that syncs the watch (absent: this server), and whether it went silent. */
+  node?: string
+  offline?: boolean
+  last_seen?: number
+}
+
+/** A sync node: a computer that syncs the watches near it for this server. */
+export interface SyncNode {
+  id: number
+  name: string
+  hostname: string
+  user_id: number
+  created_at: number
+  last_seen?: number
+  version: string
+  revoked: boolean
+  online: boolean
+  adapter?: { name: string; powered: boolean; power_state: string; busy?: { kind: string; since: number } }
+  watches: { address: string; unit: number; product: number; name: string; firmware: string }[]
 }
 
 export type AfterFetch = 'keep' | 'archive' | 'archive_delete'

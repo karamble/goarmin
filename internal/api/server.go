@@ -24,6 +24,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/karamble/goarmin/internal/importer"
+	"github.com/karamble/goarmin/internal/nodes"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/auth"
 	"github.com/karamble/goarmin/pkg/blobstore"
@@ -58,8 +59,12 @@ type Options struct {
 	TilesDark bool
 	// TilesAttribution is the map's credit, HTML, shown on every map.
 	TilesAttribution string
-	// Node is the in-process sync role (serve --with-sync), nil without it.
+	// Node is the sync role: the registry of sync nodes (with the in-process hub of serve
+	// --with-sync among them), or nil when the server syncs nothing.
 	Node Node
+	// Nodes, if set, serves the sync node API (nodeproto) and the Sync nodes tab; it is usually
+	// Node as well.
+	Nodes *nodes.Registry
 	// Imports runs uploads and USB imports; nil: the server does not import.
 	Imports *importer.Runner
 	// ImportMax and ImportMaxFiles bound one upload (8 GiB, 100,000 files).
@@ -208,6 +213,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/bluetooth", s.needUser(s.bluetooth))
 	mux.HandleFunc("POST /api/bluetooth/power", s.needUser(s.bluetoothPower))
 	s.routesReaders(mux)
+	s.routesNode(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "no such API route") })
 }
 

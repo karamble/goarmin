@@ -262,6 +262,40 @@ func TestSyncNoArchiveThenArchive(t *testing.T) {
 	}
 }
 
+// ArchiveAllowed defers the items it refuses (stored, still on the watch) and a later run
+// archives them once allowed, without pulling them again.
+func TestSyncArchiveAllowed(t *testing.T) {
+	w := newWatch(fakewatch.Options{})
+	for i := range 4 {
+		w.AddFile("FIT_TYPE_32", payload(uint64(i), 1000))
+	}
+	store := fileaccess.NewMemStore()
+	s := connect(t, w, 0, 0)
+	refused := map[smart.UUID]bool{}
+	allow := func(it fileaccess.Item) bool {
+		if len(refused) < 2 && !refused[it.UID] {
+			refused[it.UID] = true
+			return false
+		}
+		return !refused[it.UID]
+	}
+	rep, err := fileaccess.New(s.conn, store, fileaccess.Options{ArchiveAllowed: allow}).Sync(syncCtx(t))
+	if err != nil || rep.Pulled != 4 || rep.Archived != 2 || rep.Deferred != 2 || w.Unsynced() != 2 {
+		t.Fatalf("first run %+v, %v; unsynced %d", rep, err, w.Unsynced())
+	}
+	pend, _ := store.Pending(context.Background())
+	if len(pend) != 2 || !pend[0].Pulled || !pend[1].Pulled {
+		t.Fatalf("pending after the first run: %+v", pend)
+	}
+	rep, err = fileaccess.New(s.conn, store, fileaccess.Options{ArchiveAllowed: func(fileaccess.Item) bool { return true }}).Sync(syncCtx(t))
+	if err != nil || rep.Pulled != 0 || rep.Archived != 2 || w.Unsynced() != 0 {
+		t.Fatalf("second run %+v, %v; unsynced %d", rep, err, w.Unsynced())
+	}
+	if got := w.Stats().Pulls; got != 4 {
+		t.Fatalf("the watch served %d pulls, want 4 (none twice)", got)
+	}
+}
+
 // Every pull fault fails one item once; the next run fetches them all.
 func TestSyncFaults(t *testing.T) {
 	var target [5]smart.UUID

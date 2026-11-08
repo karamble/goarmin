@@ -159,3 +159,66 @@ func TestSyncDeleteRequested(t *testing.T) {
 		}
 	}
 }
+
+// TestSyncHand: with Hand (a sync node), the watch flags only what the server took; the rest
+// stays in the spool and on the watch until a later sync hands it over, without pulling it again.
+func TestSyncHand(t *testing.T) {
+	now := time.Now()
+	serial := uint32(3_500_000_001)
+	w := fakewatch.New(fakewatch.Options{})
+	for i := range 4 {
+		w.AddFile("FIT_TYPE_32", fittest.File(typedef.FileMonitoringB, serial, now.Add(-time.Duration(i)*time.Hour), 40+i))
+	}
+	open := func(_ context.Context, _ int) (multilink.Link, io.Closer, error) {
+		a, b := memlink.Pipe(memlink.Options{})
+		go func() { _ = w.Serve(context.Background(), b) }()
+		return a, a, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+
+	server := map[string][]byte{} // what the server took, by UID
+	down := 2                     // the server refuses the first two files
+	hand := func(_ context.Context, f fileaccess.StoredFile) error {
+		if down > 0 {
+			down--
+			return errors.New("connection refused")
+		}
+		b, err := os.ReadFile(f.Path)
+		if err != nil {
+			return err
+		}
+		server[f.UID.String()] = b
+		return nil
+	}
+	res, err := SyncWith(ctx, Options{DataDir: dir, Hand: hand}, addr, open, []int{0})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if r := res.Report; r.Pulled != 4 || r.Archived != 2 || r.Deferred != 2 || w.Unsynced() != 2 || len(server) != 2 {
+		t.Fatalf("first run %+v; unsynced %d; server has %d", r, w.Unsynced(), len(server))
+	}
+	// Handed files left the spool; the others wait there.
+	inSpool := 0
+	for _, f := range res.Files {
+		if _, err := os.Stat(f.Path); err == nil {
+			inSpool++
+			if server[f.UID.String()] != nil {
+				t.Errorf("%s: handed over but still in the spool", f.UID)
+			}
+		}
+	}
+	if inSpool != 2 {
+		t.Fatalf("%d files in the spool, want the 2 the server refused", inSpool)
+	}
+
+	// The server is back: the next sync hands the two over and flags them, pulling nothing.
+	res, err = SyncWith(ctx, Options{DataDir: dir, Hand: hand}, addr, open, []int{0})
+	if err != nil || res.Report.Pulled != 0 || res.Report.Archived != 2 || w.Unsynced() != 0 || len(server) != 4 {
+		t.Fatalf("second run %+v, %v; unsynced %d; server has %d", res.Report, err, w.Unsynced(), len(server))
+	}
+	if got := w.Stats().Pulls; got != 4 {
+		t.Fatalf("the watch served %d pulls, want 4 (none twice)", got)
+	}
+}

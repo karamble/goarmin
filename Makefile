@@ -128,6 +128,47 @@ open: ## Open the dashboard in the browser
 	@xdg-open "$(URL)" >/dev/null 2>&1 &
 
 # ============================================
+# Sync node (this computer syncs its watches for a server elsewhere)
+# ============================================
+##@ Sync node (goarmin sync -server; no service: after a reboot, make node-start)
+
+# The server this computer syncs for: SERVER=… on the command line, or NODE_SERVER in .env.
+NODE_SERVER ?=
+SERVER      ?= $(NODE_SERVER)
+NODE_ARGS   ?=
+NODE        := STATE_DIR="$(STATE_DIR)" scripts/node.sh
+
+.PHONY: node-login
+node-login: build-go ## Sign this computer in to a server: make node-login SERVER=http://host:8642 [EMAIL=…] (asks the password)
+	@test -n "$(SERVER)" || { echo "usage: make node-login SERVER=http://host:8642 [EMAIL=you@example.com]"; exit 2; }
+	./$(BIN) node login -data "$(DATA)" -server "$(SERVER)" $(if $(EMAIL),-email "$(EMAIL)")
+
+.PHONY: node-start
+node-start: build-go ## Start the sync node in the background (log: make node-logs); NODE_ARGS=-no-archive keeps files on the watch
+	@$(NODE) start ./$(BIN) "$(SERVER)" -data "$(DATA)" $(NODE_ARGS)
+
+.PHONY: node-stop
+node-stop: ## Stop the sync node; a running sync ends cleanly first (FORCE=1 kills it after 60 s)
+	@$(NODE) stop $(if $(FORCE),force)
+
+.PHONY: node-restart
+node-restart: build-go ## Rebuild, stop and start the sync node
+	@$(NODE) stop && $(NODE) start ./$(BIN) "$(SERVER)" -data "$(DATA)" $(NODE_ARGS)
+
+.PHONY: node-status
+node-status: build-go ## Show whether the sync node runs, the server, and each watch's state
+	@$(NODE) status || true
+	@./$(BIN) node status -data "$(DATA)" || true
+
+.PHONY: node-logs
+node-logs: ## Follow the sync node's log
+	@$(NODE) logs
+
+.PHONY: node-logout
+node-logout: build-go ## Forget this computer's sign-in (revoke it in the dashboard too)
+	./$(BIN) node logout -data "$(DATA)"
+
+# ============================================
 # Backup and Restore
 # ============================================
 ##@ Backup and restore

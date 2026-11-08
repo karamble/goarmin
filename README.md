@@ -90,9 +90,10 @@ scales show up through the export.
 
 ## Status
 
-goarmin is young and used daily by its author. Planned next is a separate **sync node**, so the
-server can run anywhere while the computer near the watch syncs to it. Later come a workout
-builder and an optional bridge to Garmin for satellite data and firmware.
+goarmin is young and used daily by its author. The server can run anywhere (Docker) while a
+**sync node** on the computer near the watch syncs it and hands the files over
+(`make node-start`). Planned next are adding new watches through a sync node, a workout builder,
+and an optional bridge to Garmin for satellite data and firmware.
 
 goarmin was written from scratch. Gadgetbridge's open-source Garmin support and a capture of
 Garmin Connect served as protocol references; none of Gadgetbridge's code is in goarmin.

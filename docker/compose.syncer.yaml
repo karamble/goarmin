@@ -1,0 +1,47 @@
+# A sync node in a container: it syncs the watches paired with this host's Bluetooth for a
+# goarmin server elsewhere, and hands every file to that server before the watch may let go of
+# it. BlueZ runs on the host; the container talks to it over the host's system D-Bus. Only one
+# goarmin may use the host's Bluetooth: never run make node-start (or a server with the sync
+# role) beside it.
+#
+#   Sign in once (asks the account's password):
+#     docker compose --env-file ~/.config/goarmin/node.env -f compose.syncer.yaml run --rm node node login -server "$GOARMIN_SERVER" -email you@example.com
+#   Then:
+#     docker compose --env-file ~/.config/goarmin/node.env -f compose.syncer.yaml up -d --build
+#
+# The watch is paired on the host first (goarmin pair, or bluetoothctl), so BlueZ holds the bond.
+name: goarmin-node
+
+services:
+  node:
+    image: goarmin:${GOARMIN_VERSION:-local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        VERSION: ${GOARMIN_VERSION:-local}
+    command: ["sync", "-server", "${GOARMIN_SERVER:?set GOARMIN_SERVER to the server's address, e.g. http://goarmin.example:8642}"]
+    restart: unless-stopped
+    user: "${GOARMIN_UID:-10001}:${GOARMIN_GID:-10001}"
+    environment:
+      GOARMIN_ADAPTER: ${GOARMIN_ADAPTER:-hci0}
+    volumes:
+      # node.json, the spool and the node's sign-in. Writable by the user above.
+      - ${GOARMIN_NODE_DATA:?set GOARMIN_NODE_DATA to the node's data directory on the host}:/data
+      # BlueZ on the host. The host's D-Bus policy must let the user above talk to org.bluez.
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # The image's health check asks a server; a node has none.
+    healthcheck:
+      disable: true
+    stop_grace_period: 70s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"

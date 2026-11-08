@@ -29,6 +29,7 @@ import (
 	"github.com/karamble/goarmin/pkg/garmin/fileaccess"
 	"github.com/karamble/goarmin/pkg/garmin/multilink"
 	"github.com/karamble/goarmin/pkg/garmin/realtime"
+	"github.com/karamble/goarmin/pkg/garmin/watch"
 )
 
 // Options configures a hub.
@@ -42,7 +43,11 @@ type Options struct {
 	// LiveMax ends a live link after this long (30 min), so a forgotten page never keeps the
 	// watch from syncing; the viewer may open it again.
 	LiveMax time.Duration
+	// In is the server's ingest (with its store) in goarmin serve -with-sync. Backend, if set,
+	// replaces it for syncs (a sync node's server over HTTP); nil means Local{In}. Pairing needs
+	// In (Add a watch runs where the server's database is).
 	In      *ingest.Ingester
+	Backend Backend
 	Logger  *slog.Logger
 
 	// The Bluetooth side, replaced by tests; nil means syncnode's and BlueZ's.
@@ -60,6 +65,9 @@ type Options struct {
 	// Features announces the host's feature capabilities in every sync and live link, as
 	// Garmin Connect does (syncnode.Options.Features).
 	Features bool
+	// NoArchive never flags files as synced on the watch, whatever each watch's setting (a
+	// rehearsal: the watch keeps everything for the host that syncs it for real).
+	NoArchive bool
 	// Clock drives the pairing session's timers (the real clock by default).
 	Clock clock.Clock
 	// A session ends after PairIdle without anyone looking (3 min) or PairMax in all (10 min);
@@ -94,6 +102,11 @@ type Status struct {
 	// importing while it runs; Listed items the watch offered, Done of Total handled.
 	Phase               string
 	Listed, Done, Total int
+	// Node names the sync node that syncs the watch (empty: this server itself). Offline says
+	// the node has not been heard from for a while (since LastSeen).
+	Node     string
+	Offline  bool
+	LastSeen time.Time
 }
 
 // Codes of the hub's own failures (beside syncnode's).
@@ -178,7 +191,8 @@ type Holder struct {
 // Hub is the in-process sync node.
 type Hub struct {
 	opt  Options
-	st   *store.Store
+	st   *store.Store // nil on a sync node (no database here)
+	be   Backend
 	log  *slog.Logger
 	lane chan struct{} // one Bluetooth operation at a time in this process
 	kick chan Request
@@ -265,8 +279,15 @@ func New(opt Options) *Hub {
 			return c.SetPowered(ctx, name, true)
 		}
 	}
-	return &Hub{opt: opt, st: opt.In.Store, log: opt.Logger, lane: make(chan struct{}, 1), kick: make(chan Request, 8),
+	h := &Hub{opt: opt, be: opt.Backend, log: opt.Logger, lane: make(chan struct{}, 1), kick: make(chan Request, 8),
 		status: map[string]*Status{}, lives: map[string]*live{}, queued: map[string]bool{}}
+	if opt.In != nil {
+		h.st = opt.In.Store
+		if h.be == nil {
+			h.be = Local{In: opt.In}
+		}
+	}
+	return h
 }
 
 // take gets Bluetooth for one operation: the lane, then the data directory's lock (a goarmin
@@ -597,16 +618,16 @@ func (h *Hub) progress(addr string) func(fileaccess.Event) {
 func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (store.SyncRun, error) {
 	addr := req.Addr
 	run := store.SyncRun{Started: time.Now(), StartedBy: req.By}
-	dev, err := h.st.EnsureDevice(ctx, store.Device{UnitID: rec.Unit, Product: rec.Product, Name: rec.Name,
-		Firmware: rec.Firmware, Address: addr})
+	w, err := h.be.Watch(ctx, addr, rec)
 	if err != nil {
 		return run, err
 	}
-	if dev.Paused && req.By == store.StartedBySchedule {
+	if w.Paused && req.By == store.StartedBySchedule {
 		return run, errPaused
 	}
-	run.DeviceID = dev.ID
+	run.DeviceID = w.DeviceID
 	spool := filepath.Join(h.opt.DataDir, "watches", strconv.FormatUint(uint64(rec.Unit), 10), "files")
+	out := Outcome{Battery: noBattery()}
 	finish := func(err error) (store.SyncRun, error) {
 		run.Finished, run.OK = time.Now(), err == nil
 		if err != nil {
@@ -615,7 +636,8 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 				run.ErrorCode = syncnode.ErrorCode(err)
 			}
 		}
-		if rerr := h.st.RecordSyncRun(ctx, run); rerr != nil {
+		out.Run = run
+		if rerr := h.be.Finish(ctx, w, out); rerr != nil {
 			h.log.Warn("nodehub: recording the sync", "err", rerr)
 		}
 		return run, err
@@ -624,31 +646,50 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 	// Whose watch is it now? Nobody's: it is not synced (what the watch records meanwhile belongs
 	// to whoever adds it next). Files from an earlier owner's time still waiting in the spool are
 	// imported for them.
-	owner, oerr := h.owner(ctx, dev)
-	if oerr != nil {
-		h.importSpool(ctx, dev, spool, &run)
+	if w.NoOwner != nil {
+		n, _ := h.be.Import(ctx, w, spool)
+		run.Imported += n
 		run.ErrorCode = CodeNoOwner
-		return finish(oerr)
+		return finish(w.NoOwner)
 	}
-	run.OwnerID = owner
+	run.OwnerID = w.Owner
+
+	// A sync node first hands over what an earlier sync left in the spool (the server was away),
+	// so the watch may flag those files in this sync.
+	if _, ok := h.be.(Hander); ok {
+		if n, ierr := h.be.Import(ctx, w, spool); ierr != nil {
+			h.log.Info("nodehub: files from an earlier sync still wait for the server", "watch", addr, "err", ierr)
+		} else {
+			run.Imported += n
+		}
+	}
 
 	sctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	res, err := h.opt.Sync(sctx, syncnode.Options{DataDir: h.opt.DataDir, Adapter: h.opt.Adapter, Device: addr,
-		NoArchive: dev.AfterFetch == store.AfterFetchKeep, DeleteActivities: dev.AfterFetch == store.AfterFetchArchiveDelete,
-		IncludeSynced: req.IncludeSynced, Delete: req.Delete, IsStored: h.isStored(ctx, dev.ID),
-		Location: h.zone(ctx, owner), Logger: h.log, OnEvent: h.progress(addr), Features: h.opt.Features})
+	sopt := syncnode.Options{DataDir: h.opt.DataDir, Adapter: h.opt.Adapter, Device: addr,
+		NoArchive: h.opt.NoArchive || w.AfterFetch == store.AfterFetchKeep, DeleteActivities: w.AfterFetch == store.AfterFetchArchiveDelete,
+		IncludeSynced: req.IncludeSynced, Delete: req.Delete,
+		IsStored: func(uid string) bool { return h.be.Stored(ctx, w, uid) },
+		Location: w.Zone, Logger: h.log, OnEvent: h.progress(addr), Features: h.opt.Features}
+	handed := 0
+	if hd, ok := h.be.(Hander); ok {
+		sopt.Hand = func(ctx context.Context, f fileaccess.StoredFile) error {
+			if err := hd.Hand(ctx, w, f); err != nil {
+				return err
+			}
+			handed++
+			return nil
+		}
+	}
+	res, err := h.opt.Sync(sctx, sopt)
 	if res.WellnessMet > 0 {
 		h.log.Info("nodehub: the watch reported its wellness threshold met", "watch", addr, "times", res.WellnessMet)
 	}
 	run.Listed, run.Failed = res.Report.Listed, res.Report.Failed
 	run.Pulled, run.Archived, run.Deleted, run.Bytes = res.Report.Pulled, res.Report.Archived, res.Report.Deleted, res.Report.Bytes
-	if res.Battery.Percent >= 0 && !res.Battery.At.IsZero() { // a real reading has a time
-		if berr := h.st.SetBattery(ctx, dev.ID, res.Battery.Percent, res.Battery.At); berr != nil {
-			h.log.Warn("nodehub: recording the battery", "err", berr)
-		}
-	}
-	h.recordDeletes(ctx, dev.ID, res.Deleted)
+	run.Imported += handed
+	out.Battery = res.Battery
+	out.DeleteSupport = deleteSupport(res.Deleted)
 	if res.StoreDir != "" {
 		spool = filepath.Join(res.StoreDir, "files")
 	}
@@ -657,93 +698,38 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 	}
 
 	// Whatever reached the spool is imported, also after a failed sync, each file into the
-	// account that owned the watch when it was recorded.
+	// account that owned the watch when it was recorded. (A sync node handed most of it over
+	// already; what is left waits for the server.)
 	h.mu.Lock()
 	h.state(addr).Phase = "importing"
 	h.mu.Unlock()
-	if ierr := h.importSpool(ctx, dev, spool, &run); ierr != nil && err == nil {
-		err = ierr
-		run.ErrorCode = CodeImport
+	n, ierr := h.be.Import(ctx, w, spool)
+	run.Imported += n
+	if ierr != nil && err == nil {
+		if _, node := h.be.(Hander); !node {
+			err = ierr
+			run.ErrorCode = CodeImport
+		}
 	}
 	return finish(err)
 }
 
-// importSpool imports the files waiting in a watch's spool.
-func (h *Hub) importSpool(ctx context.Context, dev store.Device, dir string, run *store.SyncRun) error {
-	rep, err := h.opt.In.ImportWatch(ctx, dev, store.SourceBLE, dir)
-	run.Imported += rep.New
-	if err != nil {
-		return err
-	}
-	if rep.Failed > 0 {
-		return errors.New("nodehub: " + strconv.Itoa(rep.Failed) + " files could not be imported: " + rep.Errors[0])
-	}
-	return nil
-}
+// noBattery is an outcome's battery before the watch reported one.
+func noBattery() watch.Battery { return watch.Battery{Percent: -1} }
 
-// isStored confirms a watch item is safely in the raw store, so it may be deleted from the
-// watch after its spool copy is gone.
-func (h *Hub) isStored(ctx context.Context, device int64) func(string) bool {
-	return func(uid string) bool {
-		ok, err := h.st.HasDeviceFile(ctx, device, uid+".fit")
-		return err == nil && ok
-	}
-}
-
-// recordDeletes notes whether the watch deletes files on request, from the outcome of the
-// deletes a sync asked for.
-func (h *Hub) recordDeletes(ctx context.Context, device int64, outs []syncnode.DeleteOutcome) {
+// deleteSupport tells whether the watch deletes files on request, from the outcome of the
+// deletes a sync asked for: "yes", "no", or "" when none showed it.
+func deleteSupport(outs []syncnode.DeleteOutcome) string {
 	for _, o := range outs {
 		var de *fileaccess.DeleteError
-		v := ""
 		switch {
 		case o.Err == nil:
-			v = "yes"
+			return "yes"
 		case errors.As(o.Err, &de) && de.Unsupported():
-			v = "no"
-		}
-		if v != "" {
-			if err := h.st.SetDeleteSupport(ctx, device, v); err != nil {
-				h.log.Warn("nodehub: recording delete support", "err", err)
-			}
-			return
+			return "no"
 		}
 	}
-}
-
-// zone is the owner's time zone, which the watch's clock follows (nil: the server's).
-func (h *Hub) zone(ctx context.Context, owner int64) *time.Location {
-	u, err := h.st.User(ctx, owner)
-	if err != nil || u.Timezone == "" {
-		return nil
-	}
-	loc, err := time.LoadLocation(u.Timezone)
-	if err != nil {
-		return nil
-	}
-	return loc
-}
-
-// owner is the device's owner now. A watch nobody ever owned goes to the only account of a
-// single-person server; on a shared server, or after a hand-over, it waits to be added.
-func (h *Hub) owner(ctx context.Context, dev store.Device) (int64, error) {
-	if u, err := h.st.Owner(ctx, dev.ID, time.Now().Unix()); err == nil {
-		return u, nil
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return 0, err
-	}
-	sole, err := h.st.SoleUser(ctx)
-	if err != nil {
-		if ok, _ := h.st.CanLogIn(ctx); !ok {
-			return 0, errors.New("nodehub: no account yet to give the watch to (finish the setup)")
-		}
-		return 0, ErrNoOwner
-	}
-	u, err := h.st.AssignIfUnowned(ctx, dev.ID, sole.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		return 0, ErrNoOwner // it had an owner once: handed over, waiting for the next one
-	}
-	return u, err
+	return ""
 }
 
 // live is one watch's live link with its viewers.
@@ -946,11 +932,7 @@ func (h *Hub) seed(ctx context.Context) {
 		return
 	}
 	for addr, rec := range watches {
-		dev, err := h.st.DeviceByUnit(ctx, rec.Unit)
-		if err != nil {
-			continue
-		}
-		runs, err := h.st.RecentSyncRuns(ctx, dev.ID, 50)
+		runs, err := h.be.History(ctx, rec, 50)
 		if err != nil || len(runs) == 0 {
 			continue
 		}

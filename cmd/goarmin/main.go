@@ -26,7 +26,8 @@ commands:
   serve     run the API and the dashboard
   pair      pair a Garmin watch with this computer (interactive)
   probe     connect to a paired watch and run the protocol handshake
-  sync      pull new files from a paired watch into the local spool (-once)
+  sync      run this computer as a sync node for a server (-server URL), or sync once (-once)
+  node      sign this computer in to a server as a sync node (login, status, logout)
   live      stream live values (heart rate, steps, stress, …) from a paired watch
   import    store and ingest FIT files (a USB copy of the watch, a sync spool)
   usb       list the watches on USB, or copy one's GARMIN folder (read-only)
@@ -60,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runProbe(args[1:], stdout, stderr)
 	case "sync":
 		return runSync(args[1:], stdout, stderr)
+	case "node":
+		return runNode(args[1:], stdout, stderr)
 	case "live":
 		return runLive(args[1:], stdout, stderr)
 	case "import":
