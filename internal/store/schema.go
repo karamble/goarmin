@@ -450,4 +450,36 @@ CREATE TABLE course_streams (
 	data BLOB NOT NULL                          -- gzip columnar JSON, as activity_streams
 );
 `,
+	// 10: imports (files uploaded in the browser, a watch plugged in by USB) and what a USB
+	// import has read from each watch already.
+	`
+ALTER TABLE devices ADD COLUMN usb_auto INTEGER NOT NULL DEFAULT 1;    -- import it when it is plugged in by USB
+ALTER TABLE devices ADD COLUMN usb_serial TEXT NOT NULL DEFAULT '';    -- the serial it reports on USB, learnt from an import
+
+CREATE TABLE imports (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	kind TEXT NOT NULL,                         -- upload, usb
+	source TEXT NOT NULL,                       -- the raw files' source: upload, usb, gc_export
+	name TEXT NOT NULL DEFAULT '',              -- what was imported, in words
+	device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+	started_by TEXT NOT NULL DEFAULT 'manual',  -- manual, plugged
+	status TEXT NOT NULL,                       -- uploading, queued, running, done, failed, canceled
+	created_at INTEGER NOT NULL,
+	started_at INTEGER,
+	finished_at INTEGER,
+	report TEXT NOT NULL DEFAULT '{}',          -- JSON: the counts, the errors, what was kept
+	error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX imports_user ON imports(user_id, id);
+
+CREATE TABLE usb_seen (
+	serial TEXT NOT NULL,                       -- the watch's USB serial
+	path TEXT NOT NULL,                         -- the file's path on the watch
+	size INTEGER NOT NULL,
+	modified INTEGER NOT NULL,
+	sha256 TEXT NOT NULL,
+	PRIMARY KEY (serial, path)
+) WITHOUT ROWID;
+`,
 }

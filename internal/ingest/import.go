@@ -18,6 +18,7 @@ import (
 
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/fitid"
+	"github.com/karamble/goarmin/pkg/zipwalk"
 )
 
 // MaxFileSize bounds a single imported file.
@@ -25,47 +26,54 @@ const MaxFileSize = 64 << 20
 
 // Report summarises an import.
 type Report struct {
-	Seen       int // FIT files found
-	New        int // stored for the first time
-	Known      int // already stored (same bytes)
-	Duplicates int // a copy of a recording already stored with other bytes
-	Invalid    int // a .fit name but not a valid FIT file (stored, not ingested)
-	Ingested   int
-	Failed     int
+	Seen       int `json:"seen"`       // FIT files found
+	New        int `json:"new"`        // stored for the first time
+	Known      int `json:"known"`      // already stored (same bytes)
+	Duplicates int `json:"duplicates"` // a copy of a recording already stored with other bytes
+	Invalid    int `json:"invalid"`    // a .fit name but not a valid FIT file (stored, not ingested)
+	Ingested   int `json:"ingested"`
+	Failed     int `json:"failed"`
 	// Waiting are files recorded while nobody owned the watch (after a hand-over, before the
 	// next person adds it); they stay in the spool until someone does.
-	Waiting int
-	Errors  []string
+	Waiting int `json:"waiting"`
+	// Unchanged FIT files were not read again: a USB import found them as it left them.
+	Unchanged int `json:"unchanged"`
+	// Kept are a Garmin Connect export's other files (JSON mostly), stored as they are for
+	// readers to come; KeptBy counts every such file by the export's folder.
+	Kept   int            `json:"kept"`
+	KeptBy map[string]int `json:"kept_by,omitempty"`
+	// Export: the import held a Garmin Connect export.
+	Export bool `json:"export"`
+	// Other files were neither FIT nor part of an export, and were left out.
+	Other    int   `json:"other"`
+	Archives int   `json:"archives"` // zip archives opened (set by the caller)
+	Bytes    int64 `json:"bytes"`    // read
+	// Errors are the first maxErrors problems, ErrorsMore how many more there were.
+	Errors     []string `json:"errors,omitempty"`
+	ErrorsMore int      `json:"errors_more,omitempty"`
+	// Watches counts the FIT files per watch (device id) that made them.
+	Watches map[int64]int `json:"-"`
 }
 
-// Import stores and ingests the FIT files at paths (files or directories, walked) for user.
-// source is store.SourceUSB, store.SourceBLE, …. A file made by a watch is linked to that
-// watch; a watch nobody owns yet becomes user's.
-func (in *Ingester) Import(ctx context.Context, user store.User, source string, paths []string) (Report, error) {
-	var rep Report
-	for _, root := range paths {
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if d.IsDir() || !strings.EqualFold(filepath.Ext(p), ".fit") || !d.Type().IsRegular() {
-				return nil
-			}
-			rep.Seen++
-			if err := in.importFile(ctx, user, source, p, &rep); err != nil {
-				rep.Failed++
-				rep.Errors = append(rep.Errors, p+": "+err.Error())
-			}
-			return nil
-		})
-		if err != nil {
-			return rep, err
-		}
+const maxErrors = 200
+
+func (r *Report) addError(msg string) {
+	if len(r.Errors) < maxErrors {
+		r.Errors = append(r.Errors, msg)
+		return
 	}
-	return rep, nil
+	r.ErrorsMore++
+}
+
+// Import stores and ingests what is at paths (files or folders, walked) for user: FIT files,
+// zip archives with what they hold (a USB copy, a Garmin Connect export), and an export's
+// other files, kept. source is store.SourceUSB, store.SourceBLE, …. A file made by a watch is
+// linked to that watch; a watch nobody owns yet becomes user's.
+func (in *Ingester) Import(ctx context.Context, user store.User, source string, paths []string) (Report, error) {
+	zw := &zipwalk.Walker{}
+	rep, err := in.ImportFrom(ctx, user, Paths(paths, zw), ImportOptions{Source: source})
+	rep.Archives = zw.Archives
+	return rep, err
 }
 
 // ErrHandedOver is an import's error for a watch that was handed over and not added again.
@@ -76,12 +84,19 @@ func (in *Ingester) importFile(ctx context.Context, user store.User, source, pat
 	if err != nil {
 		return err
 	}
+	_, err = in.importBytes(ctx, user, source, filepath.Base(path), b, rep)
+	return err
+}
+
+// importBytes stores and ingests one FIT file for user, into the account that owned its watch
+// when it was recorded. It returns the file's digest.
+func (in *Ingester) importBytes(ctx context.Context, user store.User, source, name string, b []byte, rep *Report) (string, error) {
 	info, ierr := fitid.Inspect(b)
 	var dev int64
 	if ierr == nil && isWatchFile(info) {
 		d, err := in.Store.EnsureDevice(ctx, store.Device{UnitID: info.SerialNumber, Product: info.Product})
 		if err != nil {
-			return err
+			return "", err
 		}
 		// The file belongs to whoever owned the watch when it was recorded; a watch nobody
 		// ever owned becomes the importer's.
@@ -89,18 +104,22 @@ func (in *Ingester) importFile(ctx context.Context, user store.User, source, pat
 		if errors.Is(err, store.ErrNotFound) {
 			owner, err = in.Store.AssignIfUnowned(ctx, d.ID, user.ID)
 			if errors.Is(err, store.ErrNotFound) {
-				return ErrHandedOver
+				return "", ErrHandedOver
 			}
 		}
 		if err != nil {
-			return err
+			return "", err
 		}
 		if owner != user.ID {
-			return fmt.Errorf("the watch %d belonged to another account when this was recorded", info.SerialNumber)
+			return "", fmt.Errorf("the watch %d belonged to another account when this was recorded", info.SerialNumber)
 		}
 		dev = d.ID
+		if rep.Watches == nil {
+			rep.Watches = map[int64]int{}
+		}
+		rep.Watches[dev]++
 	}
-	return in.store(ctx, user, dev, source, filepath.Base(path), b, info, ierr, rep)
+	return in.store(ctx, user, dev, source, name, b, info, ierr, rep)
 }
 
 // ImportWatch stores and ingests the files a sync left in dir (a watch's spool), each into the
@@ -127,7 +146,7 @@ func (in *Ingester) ImportWatch(ctx context.Context, dev store.Device, source, d
 		rep.Seen++
 		fail := func(err error) error {
 			rep.Failed++
-			rep.Errors = append(rep.Errors, p+": "+err.Error())
+			rep.addError(p + ": " + err.Error())
 			return nil
 		}
 		b, err := readFile(p)
@@ -157,7 +176,7 @@ func (in *Ingester) ImportWatch(ctx context.Context, dev store.Device, source, d
 			}
 			users[owner] = u
 		}
-		if err := in.store(ctx, u, dev.ID, source, filepath.Base(p), b, info, ierr, &rep); err != nil {
+		if _, err := in.store(ctx, u, dev.ID, source, filepath.Base(p), b, info, ierr, &rep); err != nil {
 			return fail(err)
 		}
 		if err := os.Remove(p); err != nil {
@@ -170,10 +189,10 @@ func (in *Ingester) ImportWatch(ctx context.Context, dev store.Device, source, d
 
 // store records one file's bytes for user (linked to device, if not 0) and ingests it.
 func (in *Ingester) store(ctx context.Context, user store.User, device int64, source, name string, b []byte,
-	info fitid.Info, infoErr error, rep *Report) error {
+	info fitid.Info, infoErr error, rep *Report) (string, error) {
 	sum, err := in.Blobs.PutBytes(b)
 	if err != nil {
-		return err
+		return "", err
 	}
 	f := store.RawFile{SHA256: sum, Size: int64(len(b)), UserID: user.ID, DeviceID: device, Source: source, SourceName: name}
 	if infoErr != nil {
@@ -187,25 +206,25 @@ func (in *Ingester) store(ctx context.Context, user store.User, device int64, so
 	}
 	rf, isNew, err := in.Store.AddRawFile(ctx, f)
 	if err != nil {
-		return err
+		return "", err
 	}
 	switch {
 	case !isNew:
 		rep.Known++
-		return nil
+		return sum, nil
 	case rf.DuplicateOf != 0:
 		rep.Duplicates++
-		return nil
+		return sum, nil
 	}
 	rep.New++
 	if rf.FIT == nil {
-		return nil
+		return sum, nil
 	}
 	if err := in.File(ctx, rf.ID); err != nil {
-		return err
+		return sum, err
 	}
 	rep.Ingested++
-	return nil
+	return sum, nil
 }
 
 func readFile(path string) ([]byte, error) {

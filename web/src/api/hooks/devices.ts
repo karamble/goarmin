@@ -32,6 +32,7 @@ export interface DeviceUpdate {
   nickname?: string
   after_fetch?: AfterFetch
   paused?: boolean
+  usb_auto?: boolean
 }
 
 export function useUpdateDevice(id: number) {

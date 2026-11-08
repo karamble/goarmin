@@ -85,7 +85,7 @@ func toSyncStatusJSON(st nodehub.Status) syncStatusJSON {
 func (s *Server) deviceJSON(d store.Device) map[string]any {
 	m := map[string]any{"id": d.ID, "unit_id": d.UnitID, "product": d.Product, "model": product.Name(d.Product),
 		"name": d.Name, "nickname": d.Nickname, "firmware": d.Firmware, "address": d.Address, "after_fetch": d.AfterFetch,
-		"paused": d.Paused, "delete_support": d.DeleteSupport, "battery": nil, "battery_at": unix(d.BatteryAt),
+		"paused": d.Paused, "delete_support": d.DeleteSupport, "usb_auto": d.USBAuto, "battery": nil, "battery_at": unix(d.BatteryAt),
 		"current": d.Current, "owned_from": d.OwnedFrom, "owned_to": nil}
 	if d.Battery >= 0 {
 		m["battery"] = d.Battery
@@ -157,6 +157,7 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, u store.Us
 		Nickname   *string `json:"nickname"`
 		AfterFetch *string `json:"after_fetch"`
 		Paused     *bool   `json:"paused"`
+		USBAuto    *bool   `json:"usb_auto"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -186,6 +187,13 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, u store.Us
 			return
 		}
 		d.Paused = *req.Paused
+	}
+	if req.USBAuto != nil {
+		if err := s.st.SetUSBAuto(r.Context(), d.ID, *req.USBAuto); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		d.USBAuto = *req.USBAuto
 	}
 	writeJSON(w, http.StatusOK, s.deviceJSON(d))
 }

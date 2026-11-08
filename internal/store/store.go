@@ -123,6 +123,10 @@ type Device struct {
 	Paused bool
 	// DeleteSupport is whether the watch deletes files on request: "", "yes" or "no".
 	DeleteSupport string
+	// USBAuto imports the watch when it is plugged in by USB; USBSerial is the serial it reports
+	// there ('' until a USB import learns it).
+	USBAuto   bool
+	USBSerial string
 
 	// Set by UserDevice(s), seen from that user: Current says the watch is theirs now;
 	// OwnedFrom and OwnedTo (0 = still) are their latest period with it, in Unix seconds.
@@ -183,11 +187,11 @@ func (s *Store) HadOtherOwner(ctx context.Context, device, user int64) (bool, er
 
 // deviceCols are a device's columns in scanDevice order.
 const deviceCols = `d.id, d.unit_id, d.product, d.name, d.firmware, d.address, d.after_fetch, d.nickname,
-	COALESCE(d.battery, -1), COALESCE(d.battery_at, 0), d.paused, d.delete_support`
+	COALESCE(d.battery, -1), COALESCE(d.battery_at, 0), d.paused, d.delete_support, d.usb_auto, d.usb_serial`
 
 func deviceDest(d *Device, batteryAt *int64) []any {
 	return []any{&d.ID, &d.UnitID, &d.Product, &d.Name, &d.Firmware, &d.Address, &d.AfterFetch, &d.Nickname,
-		&d.Battery, batteryAt, &d.Paused, &d.DeleteSupport}
+		&d.Battery, batteryAt, &d.Paused, &d.DeleteSupport, &d.USBAuto, &d.USBSerial}
 }
 
 func scanDevice(row interface{ Scan(...any) error }, extra ...any) (Device, error) {

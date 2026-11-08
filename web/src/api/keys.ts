@@ -44,6 +44,9 @@ export const keys = {
   deviceFiles: (id: number) => ['devices', id, 'files'] as const,
   syncLog: (device: number, problems: boolean, limit: number) => ['devices', 'log', device, problems, limit] as const,
   bluetooth: ['devices', 'bluetooth'] as const,
+  imports: ['imports'] as const,
+  importRun: (id: number) => ['imports', 'run', id] as const,
+  usb: ['usb'] as const,
 
   // Not under 'devices': a device change must not refetch (and so reset) the session.
   pairing: ['pairing'] as const,

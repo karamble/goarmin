@@ -451,6 +451,8 @@ export interface Device {
   /** Your latest period with it, Unix seconds (owned_from 0 = from the start, owned_to null = still). */
   owned_from: number
   owned_to: number | null
+  /** Imported by itself when it is plugged in by USB. */
+  usb_auto: boolean
   /** Paired with this computer (only on a server that syncs watches). */
   paired?: boolean
   /** Only while it is yours and this server syncs it. */
@@ -628,4 +630,68 @@ export interface AdminPairing {
   started_at: number
   starter: PairAccount
   owner: PairAccount
+}
+
+/** What an import found (GET /api/imports/{id}). */
+export interface ImportReport {
+  /** FIT files found; new ones stored now, known ones already stored. */
+  seen?: number
+  new?: number
+  known?: number
+  duplicates?: number
+  invalid?: number
+  ingested?: number
+  failed?: number
+  waiting?: number
+  /** FIT files not read: unchanged since the last USB import. */
+  unchanged?: number
+  /** A Garmin Connect export's other files, kept for later, and every such file by folder. */
+  kept?: number
+  kept_by?: Record<string, number>
+  export?: boolean
+  /** Files neither FIT nor part of an export, left out. */
+  other?: number
+  archives?: number
+  bytes?: number
+  errors?: string[]
+  errors_more?: number
+}
+
+export type ImportStatus = 'uploading' | 'queued' | 'running' | 'done' | 'failed' | 'canceled'
+
+/** One import run. Times are Unix seconds. */
+export interface ImportRun {
+  id: number
+  kind: 'upload' | 'usb'
+  source: 'upload' | 'usb' | 'gc_export'
+  name: string
+  device_id: number | null
+  started_by: 'manual' | 'plugged'
+  status: ImportStatus
+  created_at: number
+  started_at: number | null
+  finished_at: number | null
+  report: ImportReport
+  error: string
+}
+
+export interface ImportPage {
+  items: ImportRun[]
+  next_before: number | null
+}
+
+/** A Garmin watch plugged in at the server. */
+export interface USBWatch {
+  id: string
+  name: string
+  /** direct: goarmin reads it over USB; gvfs: through the desktop's mount; drive: a USB drive. */
+  how: 'direct' | 'gvfs' | 'drive'
+  port: string
+  mounted: boolean
+  owner: 'yours' | 'nobody' | 'other' | 'unknown'
+  device: { id: number; model: string; name: string; nickname: string } | null
+  /** Your watch only: imported when plugged in. */
+  auto: boolean | null
+  importing: ImportRun | null
+  last: ImportRun | null
 }

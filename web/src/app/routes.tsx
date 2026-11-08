@@ -77,6 +77,7 @@ export const sections: SectionDef[] = [
     pages: [
       { path: 'watches', label: 'Watches', load: () => import('../pages/devices/Watches'), detail: () => import('../pages/devices/Watch') },
       { path: 'log', label: 'Sync log', load: () => import('../pages/devices/SyncLog') },
+      { path: 'import', label: 'Import', load: () => import('../pages/devices/Import') },
       { path: 'add', label: 'Add a watch', requires: 'sync', hidden: true, load: () => import('../pages/devices/add/AddWatch') },
     ],
   },

@@ -34,7 +34,7 @@ export function GettingStarted({ me }: { me: Me }) {
     { key: 'passkey', done: (keys.data ?? []).length > 0, title: 'Add a passkey', text: 'Sign in with your fingerprint, face or security key instead of the password.', to: '/settings/security', action: 'Add a passkey' },
     me.server.sync
       ? { key: 'watch', done: current.length > 0, title: 'Add your watch', text: 'Pair it with this computer; it then syncs every 30 minutes.', to: '/devices/add', action: 'Add a watch' }
-      : { key: 'watch', done: current.length > 0 || hasData, title: 'Bring in your data', text: 'This server does not talk to watches itself: copy the watch’s GARMIN folder and run goarmin import, or run the server with --with-sync near the watch.' },
+      : { key: 'watch', done: current.length > 0 || hasData, title: 'Bring in your data', text: 'This server does not sync watches over Bluetooth: plug your watch in by USB, or import a copy of its GARMIN folder or your Garmin Connect export.', to: '/devices/import', action: 'Import' },
     { key: 'sync', done: hasData || current.some((d) => d.sync?.last_good), title: 'First sync', text: 'Health data and activities appear here once the watch has synced.', to: current[0] ? `/devices/watches/${current[0].id}` : undefined, action: current[0] ? 'Open the watch' : undefined },
     { key: 'prefs', done: !!prefs.raw.week_start || !!prefs.raw.clock || !!prefs.raw.intensity_goal || !!prefs.raw.zones, title: 'Your preferences', text: 'Week start, clock, goals and heart-rate zones follow the watch until you choose.', to: '/settings/profile', action: 'Look at them' },
   ]

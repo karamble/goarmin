@@ -24,6 +24,7 @@ import (
 	"github.com/karamble/goarmin/internal/ingest"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/internal/syncnode"
+	"github.com/karamble/goarmin/internal/usbsource"
 	"github.com/karamble/goarmin/pkg/blobstore"
 	"github.com/karamble/goarmin/pkg/garmin/wellness"
 )
@@ -70,14 +71,15 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	dataDir := fs.String("data", config.DataDir(), "data directory (database and raw files)")
 	user := fs.String("user", config.String("GOARMIN_USER", ""), "email of the account the files belong to (created if new)")
 	source := fs.String("source", "usb", "where the files come from: usb, ble (a sync spool), upload, gc_export")
+	fromUSB := fs.Bool("usb", false, "import the Garmin watch plugged in by USB (read-only: nothing on it changes)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: goarmin import -user EMAIL [-source usb|ble|upload|gc_export] PATH...\n\nStores every FIT file under the paths (walked) once, by content, and extracts its health\ndata. Importing the same files again changes nothing. PATH can be a USB copy of the watch's\nGARMIN folder or a sync spool (~/.local/share/goarmin/watches/<unit>/files, -source ble).")
+		fmt.Fprintln(stderr, "usage: goarmin import -user EMAIL [-source usb|ble|upload|gc_export] PATH...\n       goarmin import -user EMAIL -usb\n\nStores every FIT file under the paths (walked) once, by content, and extracts its health\ndata. Importing the same files again changes nothing. PATH can be a USB copy of the watch's\nGARMIN folder, a zip of one, the Garmin Connect export zip (its other files are kept for\nlater), or a sync spool (~/.local/share/goarmin/watches/<unit>/files, -source ble). -usb reads\nthe watch plugged in by USB.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *user == "" || fs.NArg() == 0 {
+	if *user == "" || (fs.NArg() == 0) == !*fromUSB {
 		fs.Usage()
 		return 2
 	}
@@ -101,11 +103,26 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	start := time.Now()
-	rep, err := in.Import(ctx, u, *source, fs.Args())
+	var rep ingest.Report
+	if *fromUSB {
+		rep, err = importUSB(ctx, in, u, *dataDir)
+	} else {
+		rep, err = in.Import(ctx, u, *source, fs.Args())
+	}
 	fmt.Fprintf(stdout, "import for %s: %d FIT files seen, %d new, %d already stored, %d duplicates of stored recordings, %d invalid; ingested %d, failed %d (%s)\n",
 		u.Email, rep.Seen, rep.New, rep.Known, rep.Duplicates, rep.Invalid, rep.Ingested, rep.Failed, time.Since(start).Round(time.Millisecond))
+	if rep.Archives > 0 || rep.Kept > 0 || rep.Other > 0 || rep.Export {
+		fmt.Fprintf(stdout, "  %d zip archives; %d other files left out", rep.Archives, rep.Other)
+		if rep.Export {
+			fmt.Fprintf(stdout, "; a Garmin Connect export: %d of its files kept for later %v", rep.Kept, rep.KeptBy)
+		}
+		fmt.Fprintln(stdout)
+	}
 	for _, e := range rep.Errors {
 		fmt.Fprintln(stdout, "  !", e)
+	}
+	if rep.ErrorsMore > 0 {
+		fmt.Fprintf(stdout, "  ! … and %d more\n", rep.ErrorsMore)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "goarmin import:", err)
@@ -288,4 +305,35 @@ func minutes(p *int64) string {
 		return "-"
 	}
 	return fmt.Sprintf("%dm", *p/60)
+}
+
+// importUSB imports the one Garmin watch plugged in by USB for u, reading it only.
+func importUSB(ctx context.Context, in *ingest.Ingester, u store.User, dataDir string) (ingest.Report, error) {
+	unlock, err := usbsource.Lock(dataDir)
+	if err != nil {
+		return ingest.Report{}, err
+	}
+	defer unlock()
+	f := usbsource.New()
+	ws, err := f.Find(ctx)
+	if err != nil {
+		return ingest.Report{}, err
+	}
+	switch len(ws) {
+	case 0:
+		return ingest.Report{}, errors.New("no Garmin watch on USB (goarmin usb lists what is there)")
+	case 1:
+	default:
+		return ingest.Report{}, errors.New("more than one Garmin watch on USB; plug in only the one to import")
+	}
+	src := func(ctx context.Context, fn func(ingest.Entry) error) error {
+		_, err := f.Read(ctx, ws[0], func(fl usbsource.File) error {
+			return fn(ingest.Entry{Path: fl.Path, Size: fl.Size, Modified: fl.Modified, Read: fl.Read})
+		})
+		if h := usbsource.Hint(err); h != "" {
+			return fmt.Errorf("%w (%s)", err, h)
+		}
+		return err
+	}
+	return in.ImportFrom(ctx, u, src, ingest.ImportOptions{Source: store.SourceUSB})
 }

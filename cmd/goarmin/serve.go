@@ -18,8 +18,10 @@ import (
 
 	"github.com/karamble/goarmin/internal/api"
 	"github.com/karamble/goarmin/internal/config"
+	"github.com/karamble/goarmin/internal/importer"
 	"github.com/karamble/goarmin/internal/nodehub"
 	"github.com/karamble/goarmin/internal/tiles"
+	"github.com/karamble/goarmin/internal/usbsource"
 	"github.com/karamble/goarmin/internal/webui"
 	"github.com/karamble/goarmin/pkg/auth"
 )
@@ -36,8 +38,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	adapter := fs.String("adapter", config.String("GOARMIN_ADAPTER", "hci0"), "Bluetooth adapter (with -with-sync)")
 	interval := fs.Duration("sync-interval", 30*time.Minute, "time between scheduled syncs (with -with-sync)")
 	fakePairer := fs.Bool("fake-pairer", false, "development: scripted Bluetooth with made-up watches, for trying Add a watch (with -with-sync, never on the default data directory)")
+	noUSB := fs.Bool("no-usb", false, "do not look for watches plugged in by USB (imports of uploaded files still work)")
+	importMaxGB := fs.Int("import-max-gb", 0, "largest upload in GB (default 8, or GOARMIN_IMPORT_MAX_GB)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *importMaxGB == 0 {
+		n, err := config.Int("GOARMIN_IMPORT_MAX_GB", 8)
+		if err != nil || n <= 0 {
+			fmt.Fprintln(stderr, "goarmin serve: GOARMIN_IMPORT_MAX_GB must be a positive number of GB")
+			return 2
+		}
+		*importMaxGB = n
 	}
 	if *fakePairer && (!*withSync || samePath(*dataDir, config.DataDir())) {
 		fmt.Fprintln(stderr, "goarmin serve: -fake-pairer needs -with-sync and a scratch -data directory (not "+config.DataDir()+")")
@@ -119,6 +131,23 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		opt.Node = hub
 		log.Info("sync role on", "adapter", *adapter, "interval", *interval)
 	}
+	var usb *usbsource.Finder
+	switch {
+	case *noUSB:
+		log.Info("usb off (-no-usb)")
+	case *fakePairer:
+		log.Info("usb off on a scratch server with -fake-pairer")
+	default:
+		usb = usbsource.New()
+		log.Info("usb on: a watch plugged in is imported for its owner")
+	}
+	imports := importer.New(importer.Options{Store: in.Store, In: in, DataDir: *dataDir, USB: usb, Logger: log})
+	importsDone := make(chan struct{})
+	go func() {
+		imports.Run(ctx)
+		close(importsDone)
+	}()
+	opt.Imports, opt.ImportMax = imports, int64(*importMaxGB)<<30
 	srv, err := api.New(opt)
 	if err != nil {
 		fmt.Fprintln(stderr, "goarmin serve:", err)
@@ -156,6 +185,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = hs.Shutdown(sctx)
+	}
+	select {
+	case <-importsDone:
+	case <-time.After(15 * time.Second):
+		log.Warn("the import did not stop within 15 s; exiting anyway")
 	}
 	if *withSync {
 		// The store closes when this returns: let a running sync or live link end first. Both

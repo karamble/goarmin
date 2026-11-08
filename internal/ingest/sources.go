@@ -1,0 +1,262 @@
+// Copyright (c) 2026 karamble
+// Use of this source code is governed by an ISC
+// license that can be found in the LICENSE file.
+
+package ingest
+
+import (
+	"context"
+	"errors"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/karamble/goarmin/internal/store"
+	"github.com/karamble/goarmin/pkg/zipwalk"
+)
+
+// Entry is one file an import reads.
+type Entry struct {
+	// Path is slash-separated within the source: "GARMIN/Activity/x.fit",
+	// "export.zip/DI_CONNECT/DI-Connect-Fitness/x.json".
+	Path     string
+	Size     int64     // -1 if unknown
+	Modified time.Time // zero if unknown
+	// Read reads the file. Err, if set, says why the source could not hand it over (an archive
+	// beyond the limits): the import reports it and goes on.
+	Read func() ([]byte, error)
+	Err  error
+}
+
+// Source hands an import its files, one at a time. fn's error ends the walk.
+type Source func(ctx context.Context, fn func(Entry) error) error
+
+// ImportOptions shape ImportFrom.
+type ImportOptions struct {
+	// Source is the raw files' source (store.SourceUSB, store.SourceUpload, …). FIT files from a
+	// Garmin Connect export are stored as store.SourceGCExport whatever it says.
+	Source string
+	// Skip, if set, is asked before a FIT file is read: true leaves it unread (Unchanged).
+	Skip func(Entry) bool
+	// Stored, if set, hears of each FIT file stored or found stored, with its digest.
+	Stored func(e Entry, sha string)
+	// Progress, if set, gets the report after each file.
+	Progress func(Report)
+}
+
+// ImportFrom stores and ingests a source's files for user. FIT files go through the same rules
+// as every import: by content once, into the account that owned the watch when each was
+// recorded. A Garmin Connect export's other files (JSON mostly) are kept as raw files, not
+// ingested, for readers to come. Anything else is counted and left out.
+func (in *Ingester) ImportFrom(ctx context.Context, user store.User, src Source, opt ImportOptions) (Report, error) {
+	var rep Report
+	err := src(ctx, func(e Entry) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		export := IsExportPath(e.Path)
+		if export {
+			rep.Export = true
+		}
+		fail := func(err error) {
+			rep.Failed++
+			rep.addError(e.Path + ": " + err.Error())
+		}
+		switch {
+		case e.Err != nil:
+			fail(e.Err)
+		case strings.EqualFold(path.Ext(e.Path), ".fit"):
+			rep.Seen++
+			if opt.Skip != nil && opt.Skip(e) {
+				rep.Unchanged++
+				break
+			}
+			b, err := e.Read()
+			if err != nil {
+				fail(err)
+				break
+			}
+			rep.Bytes += int64(len(b))
+			source := opt.Source
+			if export {
+				source = store.SourceGCExport
+			}
+			sum, err := in.importBytes(ctx, user, source, path.Base(e.Path), b, &rep)
+			if err != nil {
+				fail(err)
+			}
+			if sum != "" && opt.Stored != nil {
+				opt.Stored(e, sum)
+			}
+		case export:
+			b, err := e.Read()
+			if err != nil {
+				fail(err)
+				break
+			}
+			rep.Bytes += int64(len(b))
+			if err := in.keep(ctx, user, e.Path, b, &rep); err != nil {
+				fail(err)
+			}
+		default:
+			rep.Other++
+		}
+		if opt.Progress != nil {
+			opt.Progress(rep)
+		}
+		return nil
+	})
+	return rep, err
+}
+
+// keep stores an export's file as it is: not ingested, with its path as its name.
+func (in *Ingester) keep(ctx context.Context, user store.User, name string, b []byte, rep *Report) error {
+	sum, err := in.Blobs.PutBytes(b)
+	if err != nil {
+		return err
+	}
+	_, isNew, err := in.Store.AddRawFile(ctx, store.RawFile{SHA256: sum, Size: int64(len(b)), UserID: user.ID,
+		Source: store.SourceGCExport, SourceName: name})
+	if err != nil {
+		return err
+	}
+	if isNew {
+		rep.Kept++
+	}
+	if rep.KeptBy == nil {
+		rep.KeptBy = map[string]int{}
+	}
+	rep.KeptBy[ExportFolder(name)]++
+	return nil
+}
+
+// IsExportPath reports whether a path lies inside a Garmin Connect account export, whose
+// files sit under DI_CONNECT/DI-Connect-….
+func IsExportPath(p string) bool {
+	for _, part := range strings.Split(p, "/") {
+		if part == "DI_CONNECT" || strings.HasPrefix(part, "DI-Connect-") {
+			return true
+		}
+	}
+	return false
+}
+
+// ExportFolder is the export folder a path belongs to ("DI-Connect-Fitness"), for reports.
+func ExportFolder(p string) string {
+	parts := strings.Split(p, "/")
+	for i, part := range parts {
+		if strings.HasPrefix(part, "DI-Connect-") {
+			return part
+		}
+		if part == "DI_CONNECT" && i+2 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return "DI_CONNECT"
+}
+
+// Paths is a Source over files and folders on disk. A folder's files are named from the
+// folder itself ("GARMIN/Activity/x.fit"); a zip archive is walked with zw (nested archives
+// too), its files named from the archive ("export.zip/DI_CONNECT/…").
+func Paths(paths []string, zw *zipwalk.Walker) Source {
+	if zw == nil {
+		zw = &zipwalk.Walker{}
+	}
+	return func(ctx context.Context, fn func(Entry) error) error {
+		for _, root := range paths {
+			root = filepath.Clean(root)
+			st, err := os.Stat(root)
+			if err != nil {
+				return err
+			}
+			base := filepath.Dir(root)
+			if !st.IsDir() {
+				if err := diskEntry(ctx, root, filepath.Base(root), zw, fn); err != nil {
+					return err
+				}
+				continue
+			}
+			err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if d.IsDir() || !d.Type().IsRegular() {
+					return nil
+				}
+				rel, err := filepath.Rel(base, p)
+				if err != nil {
+					return err
+				}
+				return diskEntry(ctx, p, filepath.ToSlash(rel), zw, fn)
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// Staged is a Source over files saved under other names (an upload's staging folder): each
+// file at its disk path, named by its path in the upload.
+func Staged(files []StagedFile, zw *zipwalk.Walker) Source {
+	if zw == nil {
+		zw = &zipwalk.Walker{}
+	}
+	return func(ctx context.Context, fn func(Entry) error) error {
+		for _, f := range files {
+			if err := diskEntry(ctx, f.Disk, f.Name, zw, fn); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// StagedFile is one uploaded file: where it was saved, and its path in the upload.
+type StagedFile struct {
+	Disk string `json:"disk"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+func diskEntry(ctx context.Context, disk, name string, zw *zipwalk.Walker, fn func(Entry) error) error {
+	if strings.EqualFold(path.Ext(name), ".zip") {
+		var cbErr error
+		zw.Skipped = func(p string, err error) {
+			if cbErr == nil {
+				cbErr = fn(Entry{Path: p, Size: -1, Err: err})
+			}
+		}
+		defer func() { zw.Skipped = nil }()
+		err := zw.WalkFile(ctx, disk, name, func(f zipwalk.File) error {
+			if cbErr != nil {
+				return cbErr
+			}
+			return fn(Entry{Path: f.Path, Size: f.Size, Modified: f.Modified, Read: f.Read})
+		})
+		if cbErr != nil {
+			return cbErr
+		}
+		if err != nil && ctx.Err() == nil && isArchiveLimit(err) {
+			// The archive is no zip or beyond the limits: report it and go on with the rest.
+			return fn(Entry{Path: name, Size: -1, Err: err})
+		}
+		return err
+	}
+	st, err := os.Stat(disk)
+	if err != nil {
+		return fn(Entry{Path: name, Size: -1, Err: err})
+	}
+	return fn(Entry{Path: name, Size: st.Size(), Modified: st.ModTime(), Read: func() ([]byte, error) { return readFile(disk) }})
+}
+
+func isArchiveLimit(err error) bool {
+	return errors.Is(err, zipwalk.ErrNotZip) || errors.Is(err, zipwalk.ErrTooLarge) || errors.Is(err, zipwalk.ErrTooManyEntries)
+}

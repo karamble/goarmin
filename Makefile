@@ -255,6 +255,8 @@ web-test: ## Type-check and test the dashboard
 .PHONY: fuzz
 fuzz: ## Run the fuzz targets for 30 s each
 	$(GO) test -run='^$$' -fuzz=FuzzDecode -fuzztime=30s ./pkg/cobs
+	$(GO) test -run='^$$' -fuzz=FuzzDatasets -fuzztime=30s ./pkg/mtp
+	$(GO) test -run='^$$' -fuzz=FuzzSession -fuzztime=30s ./pkg/mtp
 
 # ============================================
 # Dependencies

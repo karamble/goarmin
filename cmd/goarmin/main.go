@@ -29,6 +29,7 @@ commands:
   sync      pull new files from a paired watch into the local spool (-once)
   live      stream live values (heart rate, steps, stress, …) from a paired watch
   import    store and ingest FIT files (a USB copy of the watch, a sync spool)
+  usb       list the watches on USB, or copy one's GARMIN folder (read-only)
   reingest  extract the health data of the stored files again
   days      print the daily summaries of an account
   activities  list the activities of an account
@@ -60,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLive(args[1:], stdout, stderr)
 	case "import":
 		return runImport(args[1:], stdout, stderr)
+	case "usb":
+		return runUSB(args[1:], stdout, stderr)
 	case "reingest":
 		return runReingest(args[1:], stdout, stderr)
 	case "activities":

@@ -22,7 +22,7 @@ const me = fixtureMe({ server: { version: 'dev', sync: true, tiles: false } })
 function device(over: Partial<Device> = {}): Device {
   return {
     id: 1, unit_id: 3912345678, product: 4536, model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: '', firmware: '23.40',
-    address: 'C0:FF:EE:12:34:56', after_fetch: 'keep', paused: false, delete_support: '', battery: 76, battery_at: now - 600,
+    address: 'C0:FF:EE:12:34:56', after_fetch: 'keep', paused: false, usb_auto: true, delete_support: '', battery: 76, battery_at: now - 600,
     current: true, owned_from: 0, owned_to: null,
     sync: { address: 'C0:FF:EE:12:34:56', running: false, live: false, last_ok: false, pulled: 0, imported: 0, failures: 0,
       away: true, away_since: now - 3600, next_sync: now + 120, last_good: now - 7200, listed: 0, done: 0, total: 0, error_code: 'not_in_range' },
@@ -97,6 +97,15 @@ describe('Watches', () => {
 describe('Watch', () => {
   const at = (path: string, m = me) =>
     renderWith(<Page><Routes><Route path="/devices/watches/:id" element={<Watch />} /></Routes></Page>, { path, me: m })
+
+  it('turns importing on USB plug-in off', async () => {
+    const writes = api([device()])
+    at('/devices/watches/1?tab=settings')
+    const sw = await screen.findByRole('switch', { name: 'Import when plugged in by USB' })
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(sw)
+    await waitFor(() => expect(writes[0]).toEqual({ method: 'PATCH', path: '/api/devices/1', body: { usb_auto: false } }))
+  })
 
   it('renames the watch and asks before deleting activities', async () => {
     const writes = api([device()])

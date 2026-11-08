@@ -117,7 +117,7 @@ https URL makes the cookies `Secure`.
 | Route | |
 |---|---|
 | `GET /api/devices` | the watches the user has or had, current ones first: `{id, unit_id, product, model, name, nickname, firmware, address, after_fetch, paused, delete_support, battery, battery_at, current, owned_from, owned_to, paired?, sync?}`. `paired` (with `--with-sync`) says whether this computer syncs it. `sync` (with `--with-sync`, only while the watch is theirs) is `{running, live, last_start, last_end, last_ok, last_error, error_code, pulled, imported, next_sync, failures, away, away_since, phase, listed, done, total}`: `phase` (connecting, listing, fetching, importing) and `done`/`total` show a running sync; a watch out of range is `away` and does not count as a failure |
-| `PATCH /api/devices/{id}` | `{nickname?, after_fetch?, paused?}`, each optional. `nickname` is at most 60 characters (`""` = the watch's own name). `after_fetch`: `keep` is the default and never flags files; `archive` makes the watch delete health files once fetched; `archive_delete` also deletes activities. `paused` stops scheduled syncs (Sync now still works) |
+| `PATCH /api/devices/{id}` | `{nickname?, after_fetch?, paused?, usb_auto?}`, each optional. `usb_auto` (default on) imports the watch when it is plugged in by USB. `nickname` is at most 60 characters (`""` = the watch's own name). `after_fetch`: `keep` is the default and never flags files; `archive` makes the watch delete health files once fetched; `archive_delete` also deletes activities. `paused` stops scheduled syncs (Sync now still works) |
 | `POST /api/devices/{id}/sync` | sync now (202). An optional body `{include_synced: true}` also fetches what another app already synced (older activities still on the watch) |
 | `GET /api/devices/{id}/summary` | what came from the watch into the user's account: `{files, bytes, by_type, activities, nights, days, first_day, last_day, first_at, last_at}` |
 | `GET /api/devices/{id}/files` | the files goarmin fetched from the watch that are the user's, newest first: `[{uid, type, fit_type, size, recorded, fetched, state, on_watch, deletable}]`. `state` is `pending` (kept until archiving is on), `kept`, `archived` (health files then leave the watch; activities stay), `deleted` or `gone` |
@@ -227,3 +227,50 @@ trying the wizard.
 - **409** while something else holds Bluetooth: `{error, busy: {kind, since}}`. `kind` is
   `sync`, `pairing`, `live` (another watch; Bluetooth serves one at a time) or `command` (a
   goarmin command on this computer).
+
+## Imports
+
+Files reach goarmin outside a sync through imports: files uploaded from the browser, and
+watches plugged in by USB. One import runs at a time, in the background; leaving the page does
+not stop it. Every file goes through the same rules as a sync: stored once by its content, into
+the account that owned the watch when the file was recorded. Importing the same files again
+changes nothing.
+
+| Route | |
+|---|---|
+| `POST /api/imports` | `multipart/form-data`, one part per file. A part's `filename` is its path in what was picked (`GARMIN/Activity/x.fit` for a folder), so folders stay recognisable. Takes `.fit` files, folders and `.zip` archives (nested ones too). The files are streamed to disk and the import is queued: **202** with the import. **413** beyond the limits (`serve -import-max-gb`, default 8 GB; 100,000 files), **415** when it is not multipart, **400** with no file in it. A refused upload is on record as failed |
+| `GET /api/imports` | Your imports, newest first: `{items, next_before}`; `?before=<id>&limit=` (at most 100) |
+| `GET /api/imports/{id}` | One import, with its progress while it runs |
+| `DELETE /api/imports/{id}` | Cancels it: a queued import never runs, a running one stops after the file it is on (what it stored stays). **409** once it has finished, or while its files are still arriving |
+| `GET /api/usb` | The Garmin watches plugged in at this server: `[{id, name, how, port, mounted, owner, device, auto, importing, last}]`. `how` is `direct` (goarmin reads MTP over USB), `gvfs` (through the desktop's mount, when a file manager holds the watch) or `drive` (a watch that is a USB drive). `owner` is `yours`, `nobody`, `other` or `unknown` (goarmin has not seen its files yet). Only your own watch shows `auto` and its `last` import; another account's shows no name |
+| `POST /api/usb/{id}/import` | Imports that watch: **202** with the import, **200** with the one already running for it, **409** for another account's watch, **404** when it is not plugged in |
+
+**An import** is `{id, kind, source, name, device_id, started_by, status, created_at, started_at,
+finished_at, report, error}`:
+
+- `kind`: `upload` or `usb`. `source`: what the files are stored as, `upload`, `usb` or
+  `gc_export` (an upload that held a Garmin Connect export).
+- `started_by`: `manual`, or `plugged` (the watch was plugged in and its owner has `usb_auto`).
+- `status`: `uploading`, `queued`, `running`, `done`, `failed` or `canceled`.
+- `report`: `{seen, new, known, duplicates, invalid, ingested, failed, waiting, unchanged, kept,
+  kept_by, export, other, archives, bytes, errors, errors_more}`.
+  - `seen` counts FIT files; `new` were stored now, `known` already were; `duplicates` are
+    another copy of a stored recording.
+  - `unchanged` FIT files were not read at all: a USB import found them as it left them.
+  - `kept`: a Garmin Connect export's other files (its JSON), stored as they are for readers to
+    come; `kept_by` counts them by the export's folder (`DI-Connect-Fitness`, …).
+  - `other` files were neither FIT nor part of an export and were left out.
+  - `errors` holds the first 200 problems, `errors_more` how many more there were.
+
+**USB.** The server looks for Garmin watches (USB vendor `091e`) every 5 seconds and imports a
+watch that appears for its owner when the owner has `usb_auto` on (`serve -no-usb` turns this
+off). A watch goarmin does not know yet is only listed until someone imports it; its first
+import teaches goarmin which watch reports that USB serial. Reading never changes anything on
+the watch. A file that has not changed since the last USB import (same path, size and time, and
+still stored for that account) is not read again. `goarmin usb` lists the watches on USB and can
+copy a watch's GARMIN folder; `goarmin import -usb` imports one from the command line. Both take
+`<data>/usb.lock`, which the server's USB imports share.
+
+**Limits on archives.** At most 200,000 entries and 20 GiB uncompressed per import, 64 MiB per
+file, archives nested three deep, and no entry compressed more than 200 times (over 1 MiB). An
+archive beyond them is reported in `errors` and the rest goes on.

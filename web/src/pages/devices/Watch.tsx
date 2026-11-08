@@ -338,6 +338,20 @@ function Settings({ d }: { d: Device }) {
           <span className={`absolute top-0.5 h-5 w-5 rounded-full transition-[left] ${!d.paused ? 'left-[22px] bg-bg' : 'left-0.5 bg-text'}`} />
         </button>
       </section>
+      <section className="card flex items-center gap-4 p-5">
+        <div className="flex-1">
+          <h2 className="caps m-0">Import when plugged in by USB</h2>
+          <p className="m-0 mt-1 text-[13px] text-muted">
+            {d.usb_auto ? 'Plugged into this server, for example to charge, the watch is read and its new files imported. Nothing on it changes.'
+              : 'Off. Import it by hand under Devices › Import.'}
+          </p>
+        </div>
+        <button type="button" role="switch" aria-checked={d.usb_auto} aria-label="Import when plugged in by USB"
+          onClick={() => save({ usb_auto: !d.usb_auto }, d.usb_auto ? 'The watch is no longer imported when plugged in' : 'The watch is imported when plugged in')}
+          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${d.usb_auto ? 'bg-lime' : 'bg-track'}`}>
+          <span className={`absolute top-0.5 h-5 w-5 rounded-full transition-[left] ${d.usb_auto ? 'left-[22px] bg-bg' : 'left-0.5 bg-text'}`} />
+        </button>
+      </section>
       <FromWatch d={d} />
       <section className="card p-5">
         <h2 className="caps m-0">Coming later</h2>

@@ -2,7 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { Activity, CalendarCheck, CalendarSearch, CornerDownLeft, Dumbbell, LayoutGrid, LogOut, Map as MapIcon, Radio, RefreshCw, Search, SlidersHorizontal, Watch } from 'lucide-react'
+import { Activity, CalendarCheck, CalendarSearch, CornerDownLeft, Dumbbell, LayoutGrid, LogOut, Map as MapIcon, Radio, RefreshCw, Search, SlidersHorizontal, Upload, Usb, Watch } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { errorText } from '../../api/client'
@@ -105,6 +105,8 @@ function Palette({ sections, onClose }: { sections: SectionDef[]; onClose: () =>
         })
       }
     }
+    out.push({ id: 'import-files', label: 'Import files', hint: 'Devices › Import', icon: Upload, run: () => navigate('/devices/import') })
+    out.push({ id: 'import-usb', label: 'Import from the watch on USB', hint: 'Devices › Import', icon: Usb, run: () => navigate('/devices/import#usb') })
     out.push({ id: 'customize', label: 'Customize the glance', icon: LayoutGrid, run: () => navigate('/?edit=1') })
     out.push({ id: 'prefs', label: 'Preferences', hint: 'Settings › Profile', icon: SlidersHorizontal, run: () => navigate('/settings/profile') })
     out.push({ id: 'logout', label: 'Sign out', icon: LogOut, run: () => logout.mutate() })

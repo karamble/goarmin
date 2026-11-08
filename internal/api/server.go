@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 
+	"github.com/karamble/goarmin/internal/importer"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/auth"
 	"github.com/karamble/goarmin/pkg/blobstore"
@@ -58,8 +59,13 @@ type Options struct {
 	// TilesAttribution is the map's credit, HTML, shown on every map.
 	TilesAttribution string
 	// Node is the in-process sync role (serve --with-sync), nil without it.
-	Node   Node
-	Logger *slog.Logger
+	Node Node
+	// Imports runs uploads and USB imports; nil: the server does not import.
+	Imports *importer.Runner
+	// ImportMax and ImportMaxFiles bound one upload (8 GiB, 100,000 files).
+	ImportMax      int64
+	ImportMaxFiles int
+	Logger         *slog.Logger
 }
 
 // Server is the API.
@@ -175,6 +181,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/devices/{id}/delete-data", s.needUser(s.deleteDeviceData))
 	mux.HandleFunc("GET /api/devices/{id}/raw.zip", s.needUser(s.rawZip))
 	mux.HandleFunc("GET /api/admin/devices", s.needAdmin(s.adminDevices))
+	mux.HandleFunc("POST /api/imports", s.needUser(s.createImport))
+	mux.HandleFunc("GET /api/imports", s.needUser(s.imports))
+	mux.HandleFunc("GET /api/imports/{id}", s.needUser(s.getImport))
+	mux.HandleFunc("DELETE /api/imports/{id}", s.needUser(s.cancelImport))
+	mux.HandleFunc("GET /api/usb", s.needUser(s.usbWatches))
+	mux.HandleFunc("POST /api/usb/{id}/import", s.needUser(s.importUSB))
 	mux.HandleFunc("POST /api/admin/devices/{id}/release", s.needAdmin(s.adminRelease))
 	mux.HandleFunc("POST /api/admin/devices/{id}/forget", s.needAdmin(s.adminForget))
 	mux.HandleFunc("POST /api/pairing", s.needUser(s.startPairing))

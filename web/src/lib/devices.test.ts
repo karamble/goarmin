@@ -12,7 +12,7 @@ const sec = (d: number) => Math.floor((now + d) / 1000)
 function dev(sync: Partial<SyncStatus> | null, over: Partial<Device> = {}): Device {
   return {
     id: 1, unit_id: 7, product: 4536, model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: '', firmware: '23.40',
-    address: 'C0:FF:EE:12:34:56', after_fetch: 'keep', paused: false, delete_support: '', battery: null,
+    address: 'C0:FF:EE:12:34:56', after_fetch: 'keep', paused: false, usb_auto: true, delete_support: '', battery: null,
     current: true, owned_from: 0, owned_to: null,
     sync: sync === null ? undefined : { address: 'A0', running: false, live: false, last_ok: false, pulled: 0, imported: 0,
       failures: 0, away: false, listed: 0, done: 0, total: 0, ...sync },
