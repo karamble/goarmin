@@ -56,7 +56,7 @@ SQLITE     ?= sqlite3
 # GNU time (not the shell keyword): wall time and peak memory for make bench-import.
 TIME       ?= /usr/bin/time
 DB         := $(DATA)/goarmin.db
-SERVER     := LISTEN="$(LISTEN)" STATE_DIR="$(STATE_DIR)" scripts/server.sh
+SERVE_SH   := LISTEN="$(LISTEN)" STATE_DIR="$(STATE_DIR)" scripts/server.sh
 START      := ./$(BIN) -data "$(DATA)" $(SERVE_ARGS)
 
 # Backups hold health data, so they live outside the repository, readable only by you.
@@ -90,15 +90,15 @@ help: ## Show this help message
 
 .PHONY: start
 start: build ## Build, then start the server in the background (log: make logs)
-	@$(SERVER) start $(START)
+	@$(SERVE_SH) start $(START)
 
 .PHONY: stop
 stop: ## Stop the server; a running sync ends cleanly first (FORCE=1 kills it after 60 s)
-	@$(SERVER) stop $(if $(FORCE),force)
+	@$(SERVE_SH) stop $(if $(FORCE),force)
 
 .PHONY: restart
 restart: build ## Rebuild, stop and start the server
-	@$(SERVER) stop && $(SERVER) start $(START)
+	@$(SERVE_SH) stop && $(SERVE_SH) start $(START)
 
 .PHONY: run
 run: build ## Build, then run the server in the foreground (Ctrl+C stops it)
@@ -107,7 +107,7 @@ run: build ## Build, then run the server in the foreground (Ctrl+C stops it)
 
 .PHONY: status
 status: ## Show whether the server runs, where, and its last log lines
-	@$(SERVER) status || true
+	@$(SERVE_SH) status || true
 
 .PHONY: logs
 logs: ## Show the last 100 lines of the server log
@@ -115,7 +115,7 @@ logs: ## Show the last 100 lines of the server log
 
 .PHONY: logs-follow
 logs-follow: ## Follow the server log
-	@$(SERVER) logs
+	@$(SERVE_SH) logs
 
 .PHONY: health
 health: ## Check that the server answers
@@ -197,7 +197,7 @@ restore: build-go ## Restore a backup (BACKUP=goarmin_backup_….tar.gz); the cu
 .PHONY: info
 info: ## Show version, server, data and backup information
 	@echo "$(BLUE)goarmin$(NC) $$(./$(BIN) version 2>/dev/null || echo '(not built)')"
-	@$(SERVER) status 2>/dev/null | head -1 || true
+	@$(SERVE_SH) status 2>/dev/null | head -1 || true
 	@echo ""
 	@echo "$(GREEN)Data$(NC) $(DATA)"
 	@du -sh "$(DATA)"/* 2>/dev/null | sed 's|$(DATA)/||; s/^/  /' || echo "  none yet"

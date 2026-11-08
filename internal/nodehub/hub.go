@@ -571,7 +571,10 @@ func (h *Hub) run(ctx context.Context, req Request, rec syncnode.WatchRecord) {
 		st.LastOK, st.LastError, st.ErrorCode, st.LastGood = true, "", "", st.LastStart
 		st.Failures, st.Away, st.AwaySince, st.Misses = 0, false, time.Time{}, 0
 		st.NextSync = st.LastStart.Add(h.opt.Interval)
+		h.log.Info("nodehub: synced", "watch", addr, "by", req.By, "listed", run.Listed, "pulled", run.Pulled,
+			"archived", run.Archived, "imported", run.Imported, "took", st.LastEnd.Sub(st.LastStart).Round(time.Second))
 	case run.ErrorCode == syncnode.CodeNotInRange:
+		h.log.Info("nodehub: the watch is not in range", "watch", addr, "retry_in", backoff(st.Misses+1, h.opt.Interval))
 		st.LastOK, st.LastError, st.ErrorCode = false, err.Error(), run.ErrorCode
 		if !st.Away {
 			st.Away, st.AwaySince = true, st.LastStart
