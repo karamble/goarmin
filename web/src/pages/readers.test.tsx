@@ -44,6 +44,29 @@ describe('Body', () => {
     expect(screen.getByText('1500')).toBeTruthy()
   })
 
+  it('draws weight and body composition on one chart, each measure switched on and off', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) })
+    const body: BodyData = { weigh_ins: [weighIn({ weight_kg: 93.1, day: addDays(day, -400), ts: now - 86400 * 400 }), weighIn()], skin_temp: [] }
+    stubApi({ '/api/body': json(body), '/api/daily': json([]) })
+    page('/health/body?p=month')
+    expect(await screen.findByText('Weight and body composition')).toBeTruthy()
+    const group = screen.getByRole('group', { name: 'Measures on the chart' })
+    const chip = (name: RegExp) => within(group).getByRole('button', { name })
+    // Only what the weigh-ins have: weight, muscle, body fat and BMI (no bone or water here); BMI starts off.
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['Weight (kg)', 'Muscle mass (kg)', 'Body fat (%)', 'BMI'])
+    expect(chip(/BMI/).getAttribute('aria-pressed')).toBe('false')
+    expect(chip(/Weight/).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(chip(/Muscle mass/))
+    expect(chip(/Muscle mass/).getAttribute('aria-pressed')).toBe('false')
+    expect(store.get('goarmin.body.history.series')).toBe(JSON.stringify(['weight_kg', 'fat_pct']))
+    // The table lists every weigh-in of the history, newest first, with each measure.
+    fireEvent.click(within(screen.getByText('Weight and body composition').closest('section')!).getByRole('button', { name: 'Table' }))
+    const rows = screen.getAllByRole('row')
+    expect(rows[1].textContent).toContain('92.4')
+    expect(rows[2].textContent).toContain('93.1')
+  })
+
   it('says what brings body data when there is none', async () => {
     stubApi({ '/api/body': json({ weigh_ins: [], skin_temp: [] }), '/api/daily': json([]) })
     page('/health/body?p=month')

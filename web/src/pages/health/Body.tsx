@@ -6,8 +6,9 @@ import { useMe } from '../../api/hooks/auth'
 import { useDailyRange } from '../../api/hooks/data'
 import { useBody } from '../../api/hooks/readers'
 import type { WeighIn } from '../../api/types'
-import { dailyBars, describeSeries, stats, timeSeries } from '../../charts'
+import { dailyBars, describeSeries, stats } from '../../charts'
 import { addDays, relDay, today } from '../../lib/period'
+import { BodyHistoryCard } from './BodyHistory'
 import { byDay, ChartCard, dayClick, Empty, Kpis, Loaded, num, rangeDays, useHealth } from './parts'
 
 /** weight in the account's units: kg, or lb for imperial. */
@@ -61,6 +62,10 @@ function BodyDay() {
                 )}
               </section>
             )}
+            {last && (
+              <BodyHistoryCard focusFrom={Date.parse(addDays(p.day, -365) + 'T00:00:00Z') / 1000}
+                focusTo={Date.parse(addDays(p.day, 1) + 'T00:00:00Z') / 1000} />
+            )}
             <section className="card p-5 sm:p-6">
               <Kpis items={[
                 { label: 'Skin temperature', value: skin?.deviation_c != null ? `${skin.deviation_c >= 0 ? '+' : '−'}${Math.abs(skin.deviation_c).toFixed(1)}` : '–', unit: '°C', hint: 'from your baseline, overnight' },
@@ -101,7 +106,6 @@ function BodyRange() {
         const delta = kg.length > 1 ? kg[kg.length - 1]! - kg[0]! : null
         const fat = ws.map((w) => w.fat_pct)
         const fs = stats(fat)
-        const t = ws.map((w) => w.ts)
         const focus = days.indexOf(p.day)
         const [from, to] = [Date.parse(p.range.from + 'T00:00:00Z') / 1000, Date.parse(addDays(p.range.to, 1) + 'T00:00:00Z') / 1000]
         return (
@@ -114,17 +118,7 @@ function BodyRange() {
                 { label: 'Body fat', value: fs ? fs.avg.toFixed(1) : '–', unit: '%', hint: 'average' },
               ]} />
             </section>
-            {ws.length > 0 && (
-              <ChartCard title="Weight" hint="Each weigh-in; the line joins them across days without one."
-                ariaLabel={describeSeries('Weight', kg, unit, 1)} height={220}
-                option={timeSeries({ from, to, digits: 1, series: [{ id: 'kg', name: 'Weight', t, v: kg, kind: 'line', role: 'primary', unit }] }, ctx)}
-                table={{ head: ['Day', `Weight (${unit})`, 'Body fat (%)', 'BMI'], rows: ws.map((w, i) => [w.day, num(kg[i], 1), num(w.fat_pct, 1), num(w.bmi, 1)]) }} />
-            )}
-            {fs && (
-              <ChartCard title="Body fat" ariaLabel={describeSeries('Body fat', fat, '%', 1)} height={180}
-                option={timeSeries({ from, to, digits: 1, series: [{ id: 'fat', name: 'Body fat', t, v: fat, kind: 'line', role: 'extra', unit: '%' }] }, ctx)}
-                table={{ head: ['Day', 'Body fat (%)'], rows: ws.flatMap((w) => (w.fat_pct == null ? [] : [[w.day, w.fat_pct.toFixed(1)]])) }} />
-            )}
+            {ws.length > 0 && <BodyHistoryCard focusFrom={from} focusTo={to} />}
             {skinV.some((x) => x != null) && (
               <ChartCard title="Skin temperature" hint="Each night's average against your baseline (°C)."
                 ariaLabel={describeSeries('Skin temperature deviation', skinV, '°C', 1)} height={180}

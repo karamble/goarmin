@@ -21,6 +21,8 @@ export interface SeriesSpec {
   /** Break the line where samples are further apart than this (s). */
   gapS?: number
   yAxis?: number
+  /** Mark each sample with a dot (sparse values such as weigh-ins). */
+  dots?: boolean
 }
 
 export interface TimeSeriesInput {
@@ -32,6 +34,9 @@ export interface TimeSeriesInput {
   markLines?: { value: number; label: string; role?: Role }[]
   markAreas?: { from: number; to: number; role: Role; label?: string }[]
   zoom?: boolean
+  /** With zoom: the window shown first (Unix seconds); the rest is reached by zooming out. */
+  zoomFrom?: number
+  zoomTo?: number
   /** Fixed decimals for tooltip values. */
   digits?: number
 }
@@ -61,7 +66,8 @@ export function timeSeries(input: TimeSeriesInput, ctx: Ctx): Option {
       series.push({ ...base, type: 'bar', itemStyle: { color }, barMaxWidth: 12 })
     } else {
       series.push({
-        ...base, type: 'line', symbol: 'none', step: s.kind === 'step' ? 'end' : undefined,
+        ...base, type: 'line', symbol: s.dots ? 'circle' : 'none', symbolSize: s.dots ? 5 : undefined, showSymbol: s.dots ? true : undefined,
+        step: s.kind === 'step' ? 'end' : undefined,
         lineStyle: { color, width: 2 }, itemStyle: { color },
         areaStyle: s.kind === 'area' ? { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [
           { offset: 0, color: withAlpha(color, 0.32) }, { offset: 1, color: withAlpha(color, 0.02) }] } } : undefined,
@@ -111,9 +117,15 @@ export function timeSeries(input: TimeSeriesInput, ctx: Ctx): Option {
     },
     xAxis: { type: 'time', min: input.from * 1000, max: input.to * 1000, axisLabel: { formatter: timeLabels(ctx, span), hideOverlap: true } },
     yAxis: ys.map((y, i) => ({ type: 'value', min: y.min, max: y.max, scale: y.min == null, splitNumber: 3, position: i ? 'right' : 'left',
+      // With two axes each names its unit, so a value reads against the right scale.
+      name: ys.length > 1 ? y.unit : undefined, nameGap: 8, nameTextStyle: { color: t.faint, fontFamily: t.mono, fontSize: 10 },
       splitLine: { show: i === 0 }, axisLabel: { formatter: (v: number) => String(Math.round(v * 100) / 100) } })),
-    dataZoom: input.zoom ? [{ type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: 'shift', moveOnMouseMove: true },
-      { type: 'slider', height: 18, bottom: 4, borderColor: t.border, fillerColor: withAlpha(t.lime, 0.12), dataBackground: { lineStyle: { color: t.faint }, areaStyle: { color: t.track } } }] : undefined,
+    dataZoom: input.zoom ? (() => {
+      const win = input.zoomFrom != null && input.zoomTo != null
+        ? { startValue: Math.max(input.zoomFrom, input.from) * 1000, endValue: Math.min(input.zoomTo, input.to) * 1000 } : {}
+      return [{ type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: 'shift', moveOnMouseMove: true, ...win },
+        { type: 'slider', height: 18, bottom: 4, borderColor: t.border, fillerColor: withAlpha(t.lime, 0.12), dataBackground: { lineStyle: { color: t.faint }, areaStyle: { color: t.track } }, ...win }]
+    })() : undefined,
     series,
   }
 }

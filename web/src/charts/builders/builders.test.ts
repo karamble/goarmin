@@ -49,6 +49,22 @@ describe('timeSeries', () => {
     expect(line.id).toBe('hr')
   })
 
+  it('marks sparse samples with dots and opens zoomed on a window', () => {
+    const o = timeSeries({ from, to, zoom: true, zoomFrom: from + 60, zoomTo: to + 99999, series: [
+      { id: 'w', name: 'Weight', t, v, kind: 'line', role: 'primary', dots: true },
+      { id: 'f', name: 'Body fat', t, v, kind: 'line', role: 'extra', yAxis: 1 },
+    ], y: [{ unit: 'kg' }, { unit: '%' }] }, ctx) as { dataZoom: { startValue?: number; endValue?: number }[]; yAxis: { position: string }[] }
+    const [w, f] = seriesOf(o)
+    expect(w.symbol).toBe('circle')
+    expect(f.symbol).toBe('none')
+    expect(f.yAxisIndex).toBe(1)
+    expect(o.yAxis.map((y) => y.position)).toEqual(['left', 'right'])
+    for (const z of o.dataZoom) {
+      expect(z.startValue).toBe((from + 60) * 1000)
+      expect(z.endValue).toBe(to * 1000) // clipped to the axis
+    }
+  })
+
   it('draws one lime series among context series', () => {
     const o = timeSeries({ from, to, series: [
       { id: 'a', name: 'A', t, v, kind: 'area', role: 'primary' },
