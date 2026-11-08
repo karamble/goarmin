@@ -117,6 +117,9 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"ok": true}) })
+	// /healthz is for container health checks and uptime probes: no session needed, no database
+	// touched, a constant body, and never logged.
+	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("GET /api/setup", s.setupStatus)
 	mux.HandleFunc("POST /api/setup", s.setup)
 	mux.HandleFunc("POST /api/auth/login", s.passwordLogin)
@@ -206,6 +209,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bluetooth/power", s.needUser(s.bluetoothPower))
 	s.routesReaders(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "no such API route") })
+}
+
+func healthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, "ok\n")
 }
 
 // securityHeaders sets a strict policy: everything comes from this origin. Map tiles are

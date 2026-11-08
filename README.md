@@ -75,6 +75,13 @@ Open the setup link and create your account. Then go to **Devices › Add a
 watch** and follow the steps; the watch shows a code to confirm. `make help`
 lists every target, including `stop`, `status`, `backup` and `restore`.
 
+## In Docker
+
+`docker/` runs the server (API, database, dashboard) in a container, behind a
+reverse proxy with HTTPS: see [docker/README.md](docker/README.md). The sync
+role stays on a computer the watch is paired with. `make docker-dev-up` tries
+the image on a scratch copy of your data at http://localhost:18642.
+
 ## Configuration
 
 `goarmin serve -h` lists the flags. Each has an environment variable, and
@@ -90,6 +97,7 @@ lists every target, including `stop`, `status`, `backup` and `restore`.
 | `GOARMIN_TILE_TOKEN` | The access token for `{token}` in the tile URL. It is never logged. |
 | `GOARMIN_TILE_DARK`, `GOARMIN_TILE_ATTRIBUTION` | For a tile style that isn't a preset: whether it is dark already, and its credit line |
 | `GOARMIN_FEATURES` | `0` stops goarmin from telling the watch which features it supports |
+| `GOARMIN_BACKUP_DIR` | Where `goarmin backup` writes archives (default `~/goarmin-backups`) |
 
 ## Commands
 
@@ -105,6 +113,8 @@ reingest    extract the health data of the stored files again
 days        print the daily summaries of an account
 activities  list the activities of an account
 user        list the accounts, or set an account's password (-set-password, read from stdin)
+backup      write a backup archive, consistent while the server runs (make backup)
+healthcheck exit 0 if the server here answers /healthz (container health checks)
 version     print the version
 ```
 

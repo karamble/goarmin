@@ -94,6 +94,53 @@ func Open(path string, opt Options) (*DB, error) {
 	return &DB{W: w, R: r}, nil
 }
 
+// Snapshot writes a consistent copy of the database file src to dst with VACUUM INTO. It is
+// safe while another process writes: the copy is one transaction's view, compacted, and src is
+// opened read-only (no pragmas, no migrations, so a newer or older program can take it). dst
+// must not exist; it is made private (0600) and checked with integrity_check.
+func Snapshot(ctx context.Context, src, dst string) error {
+	if strings.ContainsAny(src, "?#") {
+		return errors.New("sqlitex: the path must not contain ? or #")
+	}
+	if _, err := os.Stat(src); err != nil {
+		return err
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("sqlitex: %s exists", dst)
+	}
+	db, err := sql.Open("sqlite", "file:"+src+"?mode=ro&_pragma=busy_timeout(10000)")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, dst); err != nil {
+		os.Remove(dst)
+		return fmt.Errorf("sqlitex: snapshot of %s: %w", src, err)
+	}
+	if err := os.Chmod(dst, 0o600); err != nil {
+		return err
+	}
+	return Check(ctx, dst)
+}
+
+// Check runs integrity_check on the database file at path, read-only.
+func Check(ctx context.Context, path string) error {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var res string
+	if err := db.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&res); err != nil {
+		return fmt.Errorf("sqlitex: %s: %w", path, err)
+	}
+	if res != "ok" {
+		return fmt.Errorf("sqlitex: %s fails its integrity check: %s", path, res)
+	}
+	return nil
+}
+
 // Close closes both handles.
 func (db *DB) Close() error {
 	return errors.Join(db.R.Close(), db.W.Close())

@@ -1,7 +1,8 @@
 # goarmin: self-hosted Garmin sync and health dashboard
 #
-# make help lists every target. The server runs on this machine, not in Docker: the sync role
-# needs the host's Bluetooth (BlueZ over D-Bus).
+# make help lists every target. make start runs the server on this machine, with the sync role
+# (it needs the host's Bluetooth, BlueZ over D-Bus). docker/ runs the server alone in a container
+# (the Docker targets below, docker/README.md).
 SHELL := /bin/bash
 
 # Colors for output (tput for portability)
@@ -132,8 +133,8 @@ open: ## Open the dashboard in the browser
 ##@ Backup and restore
 
 .PHONY: backup
-backup: ## Back up the database, raw files and watch spool (safe while the server runs)
-	@$(BACKUPS) backup
+backup: build-go ## Back up the database, raw files and watch spool (safe while the server runs)
+	@./$(BIN) backup -data "$(DATA)" -out "$(BACKUP_DIR)"
 
 .PHONY: backup-list
 backup-list: ## List all backups
@@ -235,6 +236,63 @@ tools: ## Build the research tools (snoopdecode, fitinspect) into bin/
 clean: ## Remove build output (never touches data or backups)
 	rm -rf bin
 	find internal/webui/dist -mindepth 1 -not -name .gitkeep -delete
+
+# ============================================
+# Docker
+# ============================================
+##@ Docker (the server in a container; docker/README.md)
+
+# The local test runs on a scratch copy of DATA, kept outside the repository, on DOCKER_DEV_PORT.
+DOCKER_DEV      ?= $(STATE_DIR)/docker-dev
+DOCKER_DEV_PORT ?= 18642
+DOCKER_DEV_ENV  := GOARMIN_VERSION="$(VERSION)" GOARMIN_DATA="$(DOCKER_DEV)/data" GOARMIN_BACKUP="$(DOCKER_DEV)/backup" \
+	GOARMIN_ENV_FILE="$(DOCKER_DEV)/goarmin.env" GOARMIN_UID="$$(id -u)" GOARMIN_GID="$$(id -g)" GOARMIN_DEV_PORT="$(DOCKER_DEV_PORT)"
+DOCKER_DEV_COMPOSE := $(DOCKER_DEV_ENV) docker compose -p goarmin-dev -f docker/compose.yaml -f docker/compose.dev.yaml
+
+.PHONY: docker-image
+docker-image: ## Build the image goarmin:$(VERSION) (also tagged goarmin:local)
+	docker build -f docker/Dockerfile --build-arg VERSION="$(VERSION)" -t goarmin:"$(VERSION)" -t goarmin:local .
+
+.PHONY: docker-dev-up
+docker-dev-up: build-go docker-image ## Run the image on a scratch copy of your data at http://localhost:18642
+	@if [ ! -s "$(DOCKER_DEV)/data/goarmin.db" ]; then \
+		echo "$(BLUE)Copying the data to $(DOCKER_DEV)$(NC) (make docker-dev-clean removes it)"; \
+		mkdir -p "$(DOCKER_DEV)/data" "$(DOCKER_DEV)/backup" && chmod 700 "$(DOCKER_DEV)" && \
+		./$(BIN) backup -data "$(DATA)" -out "$(DOCKER_DEV)/backup" && \
+		tar -xzf "$$(ls -1t "$(DOCKER_DEV)"/backup/goarmin_backup_*.tar.gz | head -1)" --strip-components=1 \
+			-C "$(DOCKER_DEV)/data" --wildcards '*/goarmin.db' '*/raw' && \
+		rm -f "$(DOCKER_DEV)"/backup/goarmin_backup_*.tar.gz; \
+	fi
+	@umask 077; { [ -n "$(GOARMIN_TILE_URL)" ] && echo "GOARMIN_TILE_URL=$(GOARMIN_TILE_URL)"; \
+		[ -n "$(GOARMIN_TILE_TOKEN)" ] && echo "GOARMIN_TILE_TOKEN=$(GOARMIN_TILE_TOKEN)"; true; } > "$(DOCKER_DEV)/goarmin.env"
+	@$(DOCKER_DEV_COMPOSE) up -d
+	@echo "$(GREEN)goarmin in Docker on http://localhost:$(DOCKER_DEV_PORT)$(NC) (make docker-dev-logs, docker-dev-down)"
+
+.PHONY: docker-dev-down
+docker-dev-down: ## Stop the local test container (the scratch data stays)
+	@$(DOCKER_DEV_COMPOSE) down
+
+.PHONY: docker-dev-status
+docker-dev-status: ## Show the local test container and its health
+	@$(DOCKER_DEV_COMPOSE) ps
+
+.PHONY: docker-dev-logs
+docker-dev-logs: ## Show the local test container's log
+	@$(DOCKER_DEV_COMPOSE) logs --tail 100
+
+.PHONY: docker-dev-health
+docker-dev-health: ## Check that the local test container answers
+	@curl -fs -m 3 -o /dev/null "http://localhost:$(DOCKER_DEV_PORT)/healthz" && \
+		echo "$(GREEN)✓ goarmin in Docker answers on http://localhost:$(DOCKER_DEV_PORT)$(NC)" || \
+		{ echo "$(RED)✗ goarmin in Docker does not answer on http://localhost:$(DOCKER_DEV_PORT)$(NC)"; exit 1; }
+
+.PHONY: docker-dev-backup
+docker-dev-backup: ## Write a backup from inside the local test container (as a nightly job would)
+	@$(DOCKER_DEV_COMPOSE) exec -T goarmin goarmin backup -out /backup -keep-days 7 -keep-min 3
+
+.PHONY: docker-dev-clean
+docker-dev-clean: docker-dev-down ## Stop the local test container and delete its scratch data
+	rm -rf "$(DOCKER_DEV)"
 
 # ============================================
 # Development

@@ -69,6 +69,18 @@ https URL makes the cookies `Secure`.
 - Errors are `{"error": "…"}`. Times are Unix seconds everywhere, local days `YYYY-MM-DD`.
 - JSON, HTML, scripts, styles and fonts are gzipped when the browser accepts it; the live stream
   is not.
+- Behind a reverse proxy, every request comes from the proxy's address: the per-address login
+  limit then counts everyone together. goarmin trusts no forwarding headers.
+- Outside `/api` and `/tiles`, only the dashboard's own routes (`/`, `/health…`, `/training…`,
+  `/live`, `/devices…`, `/settings…`, `/login`, `/setup`, `/invite/…`) and its bundled files are
+  served; any other path is a plain 404.
+
+## Health checks
+
+| Route | |
+|---|---|
+| `GET /healthz` | `ok` (text/plain), for container health checks and uptime probes: no session, no database, never logged. `goarmin healthcheck` asks it on this machine. |
+| `GET /api/health` | `{"ok": true}` |
 
 ## Accounts
 

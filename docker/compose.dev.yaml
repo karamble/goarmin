@@ -1,0 +1,12 @@
+# A local test on this machine, over plain HTTP on localhost (passkeys work there):
+#
+#   docker compose --env-file … -f compose.yaml -f compose.dev.yaml up -d
+#   open http://localhost:18642
+#
+# make docker-dev-up does this with a scratch copy of your data (the Makefile, Docker section).
+services:
+  goarmin:
+    ports:
+      - "127.0.0.1:${GOARMIN_DEV_PORT:-18642}:8642"
+    environment:
+      GOARMIN_PUBLIC_URL: http://localhost:${GOARMIN_DEV_PORT:-18642}

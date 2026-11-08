@@ -1,0 +1,24 @@
+# Only the sources the image is built from. Never data, secrets, backups or build output.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!pkg/
+!web/
+
+web/node_modules
+web/coverage
+web/*.tsbuildinfo
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+**/testdata
+**/*_test.go
+**/.env
+**/.env.*
+**/*.db
+**/*.db-*
+**/*.fit
+**/*.FIT
+**/*.zip
+**/*.log

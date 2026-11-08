@@ -1,0 +1,47 @@
+# goarmin's server (API, database, dashboard) in a container. App only: no host port here. Put
+# a reverse proxy with TLS in front (passkeys need HTTPS on the address people open), or add
+# compose.dev.yaml for a local test. See README.md.
+#
+#   docker compose --env-file ~/.config/goarmin/compose.env -f compose.yaml up -d --build
+name: goarmin
+
+services:
+  goarmin:
+    image: goarmin:${GOARMIN_VERSION:-local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        VERSION: ${GOARMIN_VERSION:-local}
+    command: ["serve", "-no-usb"]
+    restart: unless-stopped
+    # Non-root by default. Under rootless Docker, 0:0 is the host user that runs Docker.
+    user: "${GOARMIN_UID:-10001}:${GOARMIN_GID:-10001}"
+    env_file:
+      - ${GOARMIN_ENV_FILE:?set GOARMIN_ENV_FILE to goarmin's settings file (see goarmin.env.example)}
+    volumes:
+      # The database, the raw files and the map tile cache. Writable by the user above.
+      - ${GOARMIN_DATA:?set GOARMIN_DATA to the data directory on the host}:/data
+      # Where `goarmin backup` writes its archives.
+      - ${GOARMIN_BACKUP:?set GOARMIN_BACKUP to the backup directory on the host}:/backup
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8642"
+    healthcheck:
+      test: ["CMD", "goarmin", "healthcheck", "-q"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    # serve lets a running import finish for up to 15 s and closes the database cleanly.
+    stop_grace_period: 70s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"

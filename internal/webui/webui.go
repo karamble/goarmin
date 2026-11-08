@@ -31,9 +31,25 @@ func Built() bool {
 	return err == nil
 }
 
-// Handler serves the built dashboard. A request that does not resolve to a bundled file falls
-// back to index.html so the single-page app loads from any path; /api and /tiles are routed
-// elsewhere by the caller.
+// Routes are the dashboard's own top-level paths besides "/": the sections of
+// web/src/app/routes.tsx and the sign-in pages of App.tsx. A test keeps the list in step.
+var Routes = []string{"health", "training", "live", "devices", "settings", "login", "setup", "invite"}
+
+// isRoute reports whether p (without the leading slash) is one of the dashboard's pages.
+func isRoute(p string) bool {
+	first, _, _ := strings.Cut(p, "/")
+	for _, r := range Routes {
+		if first == r {
+			return true
+		}
+	}
+	return false
+}
+
+// Handler serves the built dashboard. The dashboard's own routes get index.html (the
+// single-page app routes from there, with its own not-found page inside a section); every other
+// path that is not a bundled file is a plain 404. /api and /tiles are routed elsewhere by the
+// caller.
 func Handler() (http.Handler, error) {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -54,7 +70,7 @@ func Handler() (http.Handler, error) {
 			// A miss with a file extension is a stale asset reference, not an SPA route.
 			// Serving index.html there hands the browser HTML where it expects a script,
 			// which blanks the page with no clue why.
-			if path.Ext(p) != "" {
+			if path.Ext(p) != "" || !isRoute(p) {
 				http.NotFound(w, r)
 				return
 			}

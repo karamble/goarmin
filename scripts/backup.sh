@@ -3,10 +3,10 @@
 # Use of this source code is governed by an ISC
 # license that can be found in the LICENSE file.
 #
-# backup.sh backs up and restores goarmin's data directory; the Makefile's backup targets call it.
+# backup.sh lists, cleans and restores goarmin's backups; the Makefile's backup targets call it.
+# The archives themselves are written by `goarmin backup` (make backup): a consistent snapshot of
+# the database with the raw files, the watch spool and node.json.
 #
-#   backup.sh backup                      snapshot the database, archive it with the raw files,
-#                                         the watch spool and node.json
 #   backup.sh list                        list the archives and data set aside by restores
 #   backup.sh clean                       remove archives older than KEEP_DAYS, keeping KEEP_MIN
 #   backup.sh restore ARCHIVE [START…]    stop the server, swap the data in, start it again with
@@ -15,9 +15,7 @@
 # Environment: DATA (data directory), BACKUP_DIR, SQLITE (sqlite3 binary), KEEP_DAYS (30),
 # KEEP_MIN (3), YES=1 (restore without asking), LISTEN and STATE_DIR (passed to server.sh).
 #
-# The database is copied with SQLite's online backup, so a backup is consistent while the server
-# runs. Raw files are content-addressed and never change, so they are archived as they are. The
-# Bluetooth bond with the watch lives in BlueZ (/var/lib/bluetooth), not here.
+# The Bluetooth bond with the watch lives in BlueZ (/var/lib/bluetooth), not here.
 
 set -uo pipefail
 umask 077
@@ -50,51 +48,6 @@ check_db() {
   [[ -s $1 ]] || return 1
   [[ $("$SQLITE" "$1" 'PRAGMA integrity_check;' 2>&1) == ok ]] || return 1
   "$SQLITE" "$1" 'SELECT count(*) FROM schema_version;' >/dev/null 2>&1
-}
-
-backup() {
-  need_sqlite
-  [[ -s $DB ]] || die "no database at $DB (DATA=$DATA)"
-  local name out
-  name=goarmin_backup_$(date +%Y%m%d_%H%M%S)
-  mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
-  # stage and tmp are global: the EXIT trap removes them when a step fails.
-  stage=$(mktemp -d "$BACKUP_DIR/.stage.XXXXXX") || die "cannot write to $BACKUP_DIR"
-  tmp=$BACKUP_DIR/.$name.tar.gz.part
-  out=$BACKUP_DIR/$name.tar.gz
-  trap 'rm -rf "$stage" "$tmp"' EXIT
-
-  echo "${BLUE}Backing up $DATA${NC}"
-  echo "${YELLOW}[1/4] Snapshotting the database…${NC}"
-  # The online backup API copies a consistent state even while the server writes.
-  "$SQLITE" "$DB" ".timeout 10000" ".backup '$stage/goarmin.db'" || die "the database snapshot failed (disk full? df -h $BACKUP_DIR)"
-  echo "${YELLOW}[2/4] Checking the snapshot…${NC}"
-  # A backup without a sound database must never count as a backup.
-  check_db "$stage/goarmin.db" || die "the database snapshot is missing, empty or damaged; no backup was written"
-  echo "${GREEN}✓ goarmin.db $(du -h "$stage/goarmin.db" | cut -f1), integrity ok${NC}"
-
-  echo "${YELLOW}[3/4] Archiving the database, raw files and watch spool…${NC}"
-  local members=() m
-  for m in raw watches node.json; do [[ -e $DATA/$m ]] && members+=("$m"); done
-  local args=(-C "$stage" goarmin.db)
-  ((${#members[@]})) && args+=(-C "$DATA" "${members[@]}")
-  tar -czf "$tmp" --transform "s,^,$name/," --exclude='*.tmp' --exclude='*.part' "${args[@]}" ||
-    die "writing the archive failed (disk full? df -h $BACKUP_DIR)"
-
-  echo "${YELLOW}[4/4] Verifying the archive…${NC}"
-  # Read the whole listing (a pipe into grep -q would stop tar early and fail under pipefail).
-  local listing
-  listing=$(tar -tzf "$tmp" 2>/dev/null) && grep -qx "$name/goarmin.db" <<<"$listing" ||
-    die "the archive does not read back; no backup was written"
-  sync "$tmp" 2>/dev/null || true
-  mv "$tmp" "$out" && chmod 600 "$out"
-  rm -rf "$stage"
-  trap - EXIT
-
-  local users files
-  users=$("$SQLITE" "$DB" '.timeout 5000' 'SELECT count(*) FROM users;' 2>/dev/null)
-  files=$(find "$DATA/raw" -type f 2>/dev/null | wc -l)
-  echo "${GREEN}✓ Backup written: $out ($(du -h "$out" | cut -f1); accounts: ${users:-?}, raw files: $files)${NC}"
 }
 
 list() {
@@ -195,9 +148,8 @@ restore() {
 cmd=${1:-}
 shift || true
 case $cmd in
-  backup) backup ;;
   list) list ;;
   clean) clean ;;
   restore) restore "$@" ;;
-  *) echo "usage: backup.sh backup | list | clean | restore ARCHIVE [-- BIN serve-flags…]"; exit 2 ;;
+  *) echo "usage: backup.sh list | clean | restore ARCHIVE [-- BIN serve-flags…]"; exit 2 ;;
 esac

@@ -84,3 +84,71 @@ func TestTxRollsBack(t *testing.T) {
 		t.Fatal("a path with ? was accepted")
 	}
 }
+
+// TestSnapshotWhileWriting: a snapshot taken while another connection keeps committing is one
+// transaction's view (rows 1..n, no gaps), private, sound, and never overwrites a file.
+func TestSnapshotWhileWriting(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.db")
+	db, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(ctx, []string{`CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT NOT NULL)`}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		if _, err := db.W.ExecContext(ctx, `INSERT INTO a (v) VALUES ('before')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				done <- nil
+				return
+			default:
+			}
+			if _, err := db.W.ExecContext(ctx, `INSERT INTO a (v) VALUES ('during')`); err != nil {
+				done <- err
+				return
+			}
+		}
+	}()
+	dst := filepath.Join(dir, "snap.db")
+	err = Snapshot(ctx, path, dst)
+	close(stop)
+	if werr := <-done; werr != nil {
+		t.Fatal(werr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(dst)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("snapshot mode %v, %v", st.Mode(), err)
+	}
+	snap, err := sql.Open("sqlite", "file:"+dst+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+	var n, max int
+	if err := snap.QueryRow(`SELECT count(*), max(id) FROM a`).Scan(&n, &max); err != nil {
+		t.Fatal(err)
+	}
+	if n < 100 || n != max {
+		t.Fatalf("snapshot holds %d rows up to id %d, want a gapless prefix of at least 100", n, max)
+	}
+	if err := Snapshot(ctx, path, dst); err == nil {
+		t.Fatal("Snapshot overwrote an existing file")
+	}
+	if err := Check(ctx, dst); err != nil {
+		t.Fatal(err)
+	}
+}
