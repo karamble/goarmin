@@ -78,20 +78,24 @@ export function useSyncLog(device = 0, problems = false, limit = 50) {
   })
 }
 
-export function useBluetooth(enabled: boolean) {
+/** useBluetooth is the sync computer's Bluetooth; node names a sync node (0: the usual one). */
+export function useBluetooth(enabled: boolean, node = 0) {
   return useQuery({
-    queryKey: keys.bluetooth,
-    queryFn: () => request<BluetoothState>('GET', '/bluetooth'),
+    queryKey: node ? keys.bluetoothOf(node) : keys.bluetooth,
+    queryFn: () => request<BluetoothState>('GET', node ? `/bluetooth?node=${node}` : '/bluetooth'),
     enabled,
     refetchInterval: 15_000,
   })
 }
 
-export function usePowerOn() {
+export function usePowerOn(node = 0) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: () => request<BluetoothState>('POST', '/bluetooth/power', { on: true }),
-    onSuccess: (b) => qc.setQueryData(keys.bluetooth, b),
+    mutationFn: () => request<BluetoothState>('POST', '/bluetooth/power', node ? { on: true, node } : { on: true }),
+    onSuccess: (b) => {
+      qc.setQueryData(node ? keys.bluetoothOf(node) : keys.bluetooth, b)
+      void qc.invalidateQueries({ queryKey: ['pairing-computers'] })
+    },
   })
 }
 

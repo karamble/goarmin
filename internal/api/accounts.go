@@ -34,7 +34,7 @@ func toUserJSON(u store.User) userJSON {
 type serverJSON struct {
 	Version string `json:"version"`
 	Sync    bool   `json:"sync"`  // something syncs watches: this server, or a sync node (live view, sync now)
-	Pair    bool   `json:"pair"`  // Add a watch works here (the in-process sync role pairs)
+	Pair    bool   `json:"pair"`  // Add a watch works here (this server pairs, or a sync node is online)
 	Tiles   bool   `json:"tiles"` // map tiles under /tiles
 	// Map says how to show the tiles: dark already, and the credit (only with tiles).
 	Map *mapJSON `json:"map,omitempty"`

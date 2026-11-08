@@ -172,7 +172,8 @@ A sync node is a computer that syncs the watches near it for this server (`goarm
 A watch synced by a node carries `node` (its name), `offline` and `last_seen` in its `sync`
 status; a sync request for a watch whose node is offline answers 503 with when it was last heard
 from. `GET /api/me`'s `server.sync` is true once a node has been heard from; `server.pair` tells
-whether *Add a watch* works here (only where the server pairs watches itself).
+whether *Add a watch* works here: the server pairs watches itself, or a sync node is online
+([Adding a watch](#adding-a-watch-pairing)).
 
 **The node API** (`/api/node/v1`, `internal/nodeproto`) is what nodes speak; they authenticate
 with their token as `Authorization: Bearer`:
@@ -186,18 +187,28 @@ with their token as `Authorization: Bearer`:
 | `POST /stored` `{unit, uids}` | which of a watch's items the server holds (deleting from the watch after the spool copy is gone) |
 | `POST /runs`, `GET /history?unit=` | a finished sync (with battery and delete support); the last runs, for a node that starts |
 | `POST /progress` | the node's status per watch, its Bluetooth and who holds it |
-| `GET /commands` (long poll, 25 s), `POST /commands/{id}` | commands (`sync`, `live_start`, `live_stop`, `files`, `forget`, `purge`, `power_on`, `hello`) and their results |
+| `GET /commands` (long poll, 25 s), `POST /commands/{id}` | commands (`sync`, `live_start`, `live_stop`, `files`, `forget`, `purge`, `power_on`, `hello`, and the pairing steps `pair_start`, `pair_scan`, `pair_select`, `pair_confirm`, `pair_passkey`, `pair_setup`, `pair_cancel`, `pair_touch`) and their results; a pairing step answers with the session (`pairing`) or an error code (`wrong_state`, `no_session`, `owned_elsewhere`, `not_listed`, `pairing_active`, `stopping`) |
 | `POST /live` | a live link's readings, a batch a second, and how it ended |
+| `POST /pairing` `{view}` | the node's pairing session after every change |
+| `POST /pairing/owners` `{owner, watches: [{address, unit?}]}` | whose the listed watches are → `{flags}` (`yours`, `other`, `nobody`, `new` by address) |
+| `POST /pairing/identified` `{owner, unit}` | whose the identified watch is → `{ownership, former_owner, nickname?, after_fetch?}` |
+| `POST /pairing/claim` `{owner, address, record, battery, nickname, after_fetch}` | the Set up step: adds the watch to the account, routes it to the node → `{device_id, watch}` (its sync config); 409 when another account owns it |
+
+The three pairing routes answer only within a session the node runs for that account (403
+otherwise), and the claim only for the watch that session identified.
 
 ## Adding a watch (pairing)
 
-With `--with-sync` the server pairs watches itself, driven by the dashboard's *Add a watch*. One
-session runs per server at a time; only the account that started it sees or drives it (an admin
-may cancel any).
+*Add a watch* runs on a computer with Bluetooth: this server with `--with-sync`, or a sync node.
+On a node the session runs there and the server relays it: every step below becomes a command to
+the node, the node sends each change back, and whose a watch is (and adding it to an account) is
+decided by the server. One session runs per server at a time, wherever it runs; only the account
+that started it sees or drives it (an admin may cancel any).
 
 | Route | |
 |---|---|
-| `POST /api/pairing` `{owner?}` | starts a session (201). Your own running one comes back with 200; someone else's is 409. `owner` (an account id) lets an admin add a watch for someone else (403 otherwise, 404 for an unknown account). 503 without `--with-sync` |
+| `GET /api/pairing/computers?owner=` | the computers that can pair a watch for the account (default you; another account for admins only): `[{node, name, here, adapter: {name, powered, power_state, busy}}]`, this server first (`here`, `node` 0), then the online sync nodes that may sync its watches |
+| `POST /api/pairing` `{owner?, node?}` | starts a session (201). Your own running one comes back with 200; someone else's is 409. `owner` (an account id) lets an admin add a watch for someone else (403 otherwise, 404 for an unknown account). `node` pairs on that sync node; without it goarmin picks (this server, else a node with Bluetooth on). 409 when no computer can pair for the account, 503 when nothing here syncs watches or the node does not answer |
 | `GET /api/pairing` | your session, running or ended in the last 10 minutes (404 if none), so a reload finds it again |
 | `GET /api/pairing/{id}` | the session (404 for anyone but its starter) |
 | `GET /api/pairing/{id}/events` | Server-Sent Events: `event: session` with the session at once and after every change, `: ping` every 15 s, `event: end` once it is over |
@@ -214,7 +225,8 @@ sentence to show.
 
 **The session:** `{id, state, started_at, expires_at, owner: {id, email, name}, error, error_code,
 retry, discovering, watches, selected, prompt, steps, identified, ownership, former_owner, bond,
-nickname?, after_fetch?, device_id, adapter, busy}`.
+nickname?, after_fetch?, device_id, node, adapter, busy}`. `node` is `{id, name}` of the sync
+node that pairs, or null when this server does.
 - `state`: `prepare` → `waiting` (for Bluetooth) → `finding` → `pairing` → `confirm` |
   `enter_passkey` | `show_passkey` → `identifying` → `setup` → `done`, or `failed`, `canceled`,
   `expired`. A failed pairing goes back to `finding` with `error`, `error_code` and `retry`.
@@ -227,23 +239,29 @@ nickname?, after_fetch?, device_id, adapter, busy}`.
   (then `nickname` and `after_fetch` hold its current settings).
 - `error_code`: `mismatch`, `timeout`, `auth_failed`, `connect_failed`, `gone`, `in_progress`,
   `adapter_off`, `not_bonded`, `identify`, `scan`, `busy` (a goarmin command holds Bluetooth),
-  `owned_elsewhere`, `stopping`.
+  `owned_elsewhere`, `stopping`; through a node also `node_offline` (it went silent) and
+  `node_gone` (it no longer has the session: restarted or signed out).
 - `bond` once the pairing step is over: `existing` (the pairing this computer had is used),
   `code` (paired just now with a confirmed or typed code) or `no_code` (paired just now; the
   watch asked for no code). The server logs the same as `nodehub: paired`.
 - `adapter` `{name, powered, power_state, pairable}` and `busy` `{kind, since}` (who else holds
-  Bluetooth) while the session runs.
+  Bluetooth on the computer that pairs) while the session runs.
 
 The session holds Bluetooth from the scan to the end of identify; scheduled syncs wait meanwhile,
 and a live view answers 409. It ends after 3 minutes without anyone looking (no open event
-stream, no GET) or 10 minutes in all. Nothing is saved before setup: a cancelled session leaves
+stream, no GET; for a node's session the server tells the node every minute while someone
+looks) or 10 minutes in all. Nothing is saved before setup: a cancelled session leaves
 at most the Bluetooth pairing, and the next one lists the watch as paired here. A watch that turns
 out to be another account's has a pairing made just now removed.
 
 `GOARMIN_FIRST_SESSION=1` makes the first connection after a fresh pairing tell the watch its
 setup is complete, as Garmin's apps do (off until tested on hardware). `serve -fake-pairer` (with
 `-with-sync` and a scratch `-data` directory) replaces Bluetooth with two made-up watches, for
-trying the wizard.
+trying the wizard; `goarmin sync -server URL -fake-pairer` (a scratch `-data` directory) does the
+same on a node.
+
+`GET /api/bluetooth?node=` and `POST /api/bluetooth/power` `{on, node}` read and switch on a sync
+node's Bluetooth (a node you may pair with; any for admins).
 
 **The live stream.**
 - **`event: hello`**, `data: {"since"}`, comes first: when the link opened (Unix seconds).

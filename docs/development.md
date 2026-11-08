@@ -54,9 +54,11 @@ make check         # gofmt, go vet, Go tests, the dashboard's type check and tes
   fills an account on a scratch server with plausible health data, activities with tracks,
   training values and a coach plan. It refuses the default data directory.
 - **No Bluetooth.** `goarmin serve -with-sync -fake-pairer -data DIR` scripts two made-up
-  watches for trying *Add a watch* (scratch data only).
-- **A node against a server.** `internal/nodeclient`'s end-to-end test runs a real server
-  (httptest) and a node syncing the fake watch, with the server refusing uploads for a while.
+  watches for trying *Add a watch* (scratch data only). `goarmin sync -server URL -fake-pairer
+  -data DIR` does the same on a scratch node, for *Add a watch* through a node.
+- **A node against a server.** `internal/nodeclient`'s end-to-end tests run a real server
+  (httptest) and a node: syncing the fake watch with the server refusing uploads for a while,
+  and the whole *Add a watch* wizard through the node with the scripted Bluetooth.
 - **The fake watch.** `pkg/garmin/fakewatch` answers the protocol in tests: handshake, listing,
   file pipes, MLR with loss injection, live values, battery. The sync, live and pairing tests
   run against it.

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karamble/goarmin/internal/nodehub"
 	"github.com/karamble/goarmin/internal/nodeproto"
 	"github.com/karamble/goarmin/pkg/httpx"
 )
@@ -216,6 +217,29 @@ func (c *Client) Result(ctx context.Context, id string, res nodeproto.CommandRes
 // Live sends a batch of live readings.
 func (c *Client) Live(ctx context.Context, req nodeproto.LiveRequest) error {
 	return c.json(ctx, http.MethodPost, "/live", req, nil)
+}
+
+// PairOwners asks whose the watches a pairing session lists are.
+func (c *Client) PairOwners(ctx context.Context, req nodeproto.PairOwnersRequest) (map[string]string, error) {
+	var out nodeproto.PairOwnersResponse
+	return out.Flags, c.json(ctx, http.MethodPost, "/pairing/owners", req, &out)
+}
+
+// PairIdentified asks whose the identified watch is.
+func (c *Client) PairIdentified(ctx context.Context, req nodeproto.PairIdentifiedRequest) (nodehub.IdentifiedOwner, error) {
+	var out nodehub.IdentifiedOwner
+	return out, c.json(ctx, http.MethodPost, "/pairing/identified", req, &out)
+}
+
+// PairClaim adds the identified watch to its owner's account.
+func (c *Client) PairClaim(ctx context.Context, claim nodehub.PairClaim) (nodeproto.PairClaimResponse, error) {
+	var out nodeproto.PairClaimResponse
+	return out, c.json(ctx, http.MethodPost, "/pairing/claim", claim, &out)
+}
+
+// PairView sends the pairing session after a change.
+func (c *Client) PairView(ctx context.Context, v nodehub.PairView) error {
+	return c.json(ctx, http.MethodPost, "/pairing", nodeproto.PairViewRequest{View: v}, nil)
 }
 
 // --- Files the node keeps in its data directory ---

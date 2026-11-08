@@ -42,6 +42,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	verbose := fs.Bool("v", false, "log protocol details")
 	features := fs.Bool("features", false, "announce the host's feature capabilities as Garmin Connect does (wellness threshold notifications) and print the watch's answer")
 	server := fs.String("server", config.String("GOARMIN_SERVER", ""), "run as a sync node for this server: sync on a schedule and hand every file to it (sign in first: goarmin node login)")
+	fakePairer := fs.Bool("fake-pairer", false, "development, with -server: scripted Bluetooth with made-up watches, for trying Add a watch through a node (never on the default data directory)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: goarmin sync -server URL [-no-archive]\n       goarmin sync -once [-no-archive] [flags]\n\nWith -server this computer is a sync node: it syncs the watches paired with it every 30\nminutes and when the server asks, hands each file to the server, and flags a file on the\nwatch only once the server has it. Sign in first with goarmin node login.\n\nWith -once it connects to a paired watch, pulls the files it has not handed out yet into the\nlocal spool and, unless -no-archive is given, flags them as synced. The watch deletes health\nfiles once they are flagged; goarmin flags a file only after it is stored.")
 		fs.PrintDefaults()
@@ -49,8 +50,12 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *fakePairer && (*server == "" || *once || samePath(*dataDir, config.DataDir())) {
+		fmt.Fprintln(stderr, "goarmin sync: -fake-pairer needs -server and a scratch -data directory (not "+config.DataDir()+")")
+		return 2
+	}
 	if *server != "" && !*once {
-		return runNodeDaemon(*dataDir, *server, *adapter, *noArchive, *features, *verbose, stdout, stderr)
+		return runNodeDaemon(*dataDir, *server, *adapter, *noArchive, *features, *fakePairer, *verbose, stdout, stderr)
 	}
 	if !*once {
 		fs.Usage()

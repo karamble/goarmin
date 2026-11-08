@@ -5,7 +5,7 @@
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { PairView, PairWatch } from '../../../api/types'
-import { flagOf, pairHint, signalBars, signalText } from '../../../lib/pairing'
+import { computer, flagOf, pairHint, signalBars, signalText } from '../../../lib/pairing'
 import { Button, Notice, Spinner } from '../../../ui/kit'
 import { SignalBars, StepHeading } from './parts'
 
@@ -18,12 +18,13 @@ export function Find({ view, onSelect, onScan, busy }: {
   onScan: () => void
   busy: boolean
 }) {
-  const choosable = view.watches.filter((w) => !flagOf(w).disabled)
+  const name = view.node?.name
+  const choosable = view.watches.filter((w) => !flagOf(w, name).disabled)
   // The person's own choice (after a failed try: the watch they tried). Until they choose, the
   // only watch that can be chosen is picked for them, and nothing once more show up.
   const [picked, setPicked] = useState<string | null>(view.selected)
   const chosen = picked ?? (choosable.length === 1 ? choosable[0].address : '')
-  const pick = view.watches.find((w) => w.address === chosen && !flagOf(w).disabled)
+  const pick = view.watches.find((w) => w.address === chosen && !flagOf(w, name).disabled)
   const slow = useSlow(view.discovering && view.watches.length === 0, 15_000)
   return (
     <div className="grid gap-5">
@@ -31,7 +32,7 @@ export function Find({ view, onSelect, onScan, busy }: {
         <StepHeading>Choose your watch</StepHeading>
         <p className="m-0 mt-2 text-[15px] text-muted">The watch in pairing mode shows up here within a few seconds.</p>
       </div>
-      {view.error && <Notice tone="error">{pairHint(view.error_code) || view.error}</Notice>}
+      {view.error && <Notice tone="error">{pairHint(view.error_code, name) || view.error}</Notice>}
       <div className="flex flex-wrap items-center gap-3 text-[14px]" aria-live="polite">
         {view.discovering ? (
           <><Spinner label="Searching" /><span className="text-muted">Searching for watches…</span></>
@@ -51,7 +52,7 @@ export function Find({ view, onSelect, onScan, busy }: {
           {slow && (
             <ul className="mx-auto mt-4 grid max-w-[460px] list-disc gap-1 pl-5 text-left text-[14px] text-muted">
               <li>Is Pair Phone open on the watch? It closes after a while; open it again.</li>
-              <li>Bring the watch closer to this computer.</li>
+              <li>Bring the watch closer to {computer(name)}.</li>
               <li>If a phone is next to it, close Garmin Connect there for a moment.</li>
             </ul>
           )}
@@ -59,7 +60,7 @@ export function Find({ view, onSelect, onScan, busy }: {
       ) : (
         <fieldset className="m-0 grid gap-2 border-0 p-0">
           <legend className="sr-only">Watches nearby</legend>
-          {view.watches.map((w) => <WatchRow key={w.address} w={w} checked={w.address === chosen} onPick={setPicked} />)}
+          {view.watches.map((w) => <WatchRow name={name} key={w.address} w={w} checked={w.address === chosen} onPick={setPicked} />)}
         </fieldset>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -69,14 +70,14 @@ export function Find({ view, onSelect, onScan, busy }: {
         {pick?.paired_here && (
           <Button variant="ghost" small disabled={busy} onClick={() => onSelect(pick.address, true)}>Pair again</Button>
         )}
-        {pick?.paired_here && <span className="text-[13px] text-faint">Pair again removes this computer's pairing first. Use it only when the pairing no longer works: the watch keeps its own record of this computer and offers no way to remove it.</span>}
+        {pick?.paired_here && <span className="text-[13px] text-faint">Pair again removes the pairing on {computer(name)} first. Use it only when the pairing no longer works: the watch keeps its own record of {computer(name)} and offers no way to remove it.</span>}
       </div>
     </div>
   )
 }
 
-function WatchRow({ w, checked, onPick }: { w: PairWatch; checked: boolean; onPick: (a: string) => void }) {
-  const flag = flagOf(w)
+function WatchRow({ w, checked, onPick, name }: { w: PairWatch; checked: boolean; onPick: (a: string) => void; name?: string }) {
+  const flag = flagOf(w, name)
   const id = `watch-${w.address.replaceAll(':', '')}`
   return (
     <label htmlFor={id}

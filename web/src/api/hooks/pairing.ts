@@ -8,7 +8,7 @@ import { isOver } from '../../lib/pairing'
 import { ApiError, request } from '../client'
 import { keys } from '../keys'
 import { streamPairing } from '../live'
-import type { AdminPairing, PairView } from '../types'
+import type { AdminPairing, PairComputer, PairView } from '../types'
 
 /** notFoundAsNull turns a 404 into null (no session), any other failure stays an error. */
 async function notFoundAsNull<T>(p: Promise<T>): Promise<T | null> {
@@ -93,10 +93,22 @@ function usePairAction<V>(fn: (v: V) => Promise<PairView>) {
   return useMutation({ mutationFn: fn, onSuccess: (v) => qc.setQueryData(keys.pairing, v) })
 }
 
-/** useStartPairing opens a session (an admin may name its owner) and starts the search for watches. */
+/** usePairComputers lists the computers that can pair a watch for owner: this server, sync nodes. */
+export function usePairComputers(owner: number, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.pairComputers(owner),
+    queryFn: () => request<PairComputer[]>('GET', `/pairing/computers?owner=${owner}`),
+    enabled,
+    refetchInterval: 15_000,
+  })
+}
+
+/** useStartPairing opens a session (an admin may name its owner; node picks the computer that
+ * pairs) and starts the search for watches. */
 export function useStartPairing() {
-  return usePairAction(async (owner?: number) => {
-    const v = await request<PairView>('POST', '/pairing', owner ? { owner } : undefined)
+  return usePairAction(async ({ owner, node }: { owner?: number; node?: number } = {}) => {
+    const body = { ...(owner ? { owner } : {}), ...(node ? { node } : {}) }
+    const v = await request<PairView>('POST', '/pairing', Object.keys(body).length ? body : undefined)
     // A session of yours that runs already (another tab) is resumed as it is.
     if (v.state !== 'prepare') return v
     return request<PairView>('POST', `/pairing/${encodeURIComponent(v.id)}/scan`)

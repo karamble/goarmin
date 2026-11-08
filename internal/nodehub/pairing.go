@@ -86,6 +86,8 @@ var (
 	ErrWrongState     = errors.New("nodehub: not possible at this step")
 	ErrOwnedElsewhere = errors.New("nodehub: this watch belongs to another account")
 	ErrNotListed      = errors.New("nodehub: that watch is not in the list")
+	// ErrCannotPair is returned by a hub without a PairBackend.
+	ErrCannotPair = errors.New("nodehub: this computer cannot add watches")
 )
 
 // PairWatch is a watch in the session's list.
@@ -146,6 +148,12 @@ type PairView struct {
 	// Nickname and AfterFetch are the current settings of a watch that is yours already.
 	Nickname, AfterFetch string
 	DeviceID             int64
+	// Version counts the session's changes, so a relayed copy keeps the newest.
+	Version uint64
+	// Node and NodeID name the sync node the session runs on, as the server relays it (empty:
+	// the server pairs itself).
+	Node   string
+	NodeID int64
 }
 
 // Terminal reports whether the session has ended.
@@ -210,6 +218,7 @@ type pairSession struct {
 	scanTimer  clock.Timer
 	settingUp  bool
 	fresh      bool
+	flagsRetry time.Time // when to ask again whose the listed watches are, after a failed lookup
 	identity   syncnode.Identity
 	idleT      clock.Timer
 	maxT       clock.Timer
@@ -229,6 +238,9 @@ func (h *Hub) StartPairing(starter, owner int64) (PairView, bool, error) {
 	defer h.mu.Unlock()
 	if h.pairStopped {
 		return PairView{}, false, ErrStopping
+	}
+	if h.pb == nil {
+		return PairView{}, false, ErrCannotPair
 	}
 	if s := h.pairing; s != nil {
 		s.mu.Lock()
@@ -296,6 +308,20 @@ func (h *Hub) Pairing(user int64) (PairView, bool) {
 	return s.viewLocked(), true
 }
 
+// PairingView returns the session id whoever started it (a sync node answering the server, which
+// checked who may see it).
+func (h *Hub) PairingView(id string) (PairView, error) {
+	h.mu.Lock()
+	s := h.pairing
+	h.mu.Unlock()
+	if s == nil || s.id != id {
+		return PairView{}, ErrNoSession
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.viewLocked(), nil
+}
+
 // RunningPairing returns the session that runs now, whoever started it (for admins: who is
 // adding a watch, so a stuck session can be ended).
 func (h *Hub) RunningPairing() (PairView, bool) {
@@ -332,11 +358,49 @@ func (h *Hub) PairEvents(id string, user int64) (<-chan PairView, func(), error)
 	if err != nil {
 		return nil, nil, err
 	}
+	ch, stop := s.subscribe(true)
+	return ch, stop, nil
+}
+
+// PairFollow streams the session id like PairEvents, without counting as a viewer: a sync node
+// relays its session to the server, where the people looking at it are counted (PairTouch).
+func (h *Hub) PairFollow(id string) (<-chan PairView, func(), error) {
+	h.mu.Lock()
+	s := h.pairing
+	h.mu.Unlock()
+	if s == nil || s.id != id {
+		return nil, nil, ErrNoSession
+	}
+	ch, stop := s.subscribe(false)
+	return ch, stop, nil
+}
+
+// PairTouch tells the session id that someone looks at it elsewhere (the server shows a sync
+// node's session in a browser), so the watchdog lets it be. ErrNoSession: this hub does not
+// have it (any more).
+func (h *Hub) PairTouch(id string) error {
+	h.mu.Lock()
+	s := h.pairing
+	h.mu.Unlock()
+	if s == nil || s.id != id {
+		return ErrNoSession
+	}
+	s.mu.Lock()
+	s.lastSeen = h.opt.Clock.Now()
+	s.mu.Unlock()
+	return nil
+}
+
+// subscribe hands out a stream of the session's views; viewer counts it for the watchdog.
+func (s *pairSession) subscribe(viewer bool) (<-chan PairView, func()) {
+	h := s.h
 	ch := make(chan PairView, 1)
 	s.mu.Lock()
 	ch <- s.viewLocked()
 	s.subs[ch] = true
-	s.viewers++
+	if viewer {
+		s.viewers++
+	}
 	s.mu.Unlock()
 	var once sync.Once
 	stop := func() {
@@ -344,6 +408,9 @@ func (h *Hub) PairEvents(id string, user int64) (<-chan PairView, func(), error)
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			delete(s.subs, ch)
+			if !viewer {
+				return
+			}
 			s.viewers--
 			s.lastSeen = h.opt.Clock.Now()
 			if s.viewers == 0 && !terminal(s.v.State) {
@@ -352,7 +419,7 @@ func (h *Hub) PairEvents(id string, user int64) (<-chan PairView, func(), error)
 			}
 		})
 	}
-	return ch, stop, nil
+	return ch, stop
 }
 
 // PairScan starts discovery: from the start (taking Bluetooth, waiting for a running sync), or
@@ -473,38 +540,18 @@ func (h *Hub) PairSetup(ctx context.Context, id string, user int64, req PairSetu
 
 func (h *Hub) setup(ctx context.Context, s *pairSession, ident syncnode.Identity, owner int64, fresh, former bool,
 	req PairSetupRequest) (PairView, error) {
-	rec := ident.Record
-	dev, err := h.st.EnsureDevice(ctx, store.Device{UnitID: rec.Unit, Product: rec.Product, Name: rec.Name,
-		Firmware: rec.Firmware, Address: ident.Address})
-	if err != nil {
-		return PairView{}, err
-	}
-	cur, err := h.st.Owner(ctx, dev.ID, time.Now().Unix()) // ownership is wall time, like the store's
-	switch {
-	case err == nil && cur == owner:
-	case err == nil:
-		return h.ownedElsewhere(s, ident.Address, fresh)
-	case errors.Is(err, store.ErrNotFound):
-		if err := h.st.ClaimDevice(ctx, dev.ID, owner); errors.Is(err, store.ErrOwned) {
-			return h.ownedElsewhere(s, ident.Address, fresh)
-		} else if err != nil {
-			return PairView{}, err
-		}
-	default:
-		return PairView{}, err
-	}
-	if err := h.st.SetNickname(ctx, dev.ID, strings.TrimSpace(req.Nickname)); err != nil {
-		return PairView{}, err
-	}
 	mode := store.AfterFetchArchive
 	if req.GarminConnect {
 		mode = store.AfterFetchKeep
 	}
-	if err := h.st.SetAfterFetch(ctx, dev.ID, mode); err != nil {
-		return PairView{}, err
+	rec := ident.Record
+	id, err := h.pb.Claim(ctx, PairClaim{Owner: owner, Address: ident.Address, Record: rec, Battery: ident.Battery,
+		Nickname: strings.TrimSpace(req.Nickname), AfterFetch: mode})
+	if errors.Is(err, ErrOwnedElsewhere) {
+		return h.ownedElsewhere(s, ident.Address, fresh)
 	}
-	if b := ident.Battery; b.Percent >= 0 && !b.At.IsZero() {
-		_ = h.st.SetBattery(ctx, dev.ID, b.Percent, b.At)
+	if err != nil {
+		return PairView{}, err
 	}
 	if err := h.opt.Pairer.Save(ident.Address, rec); err != nil {
 		return PairView{}, err
@@ -517,7 +564,7 @@ func (h *Hub) setup(ctx context.Context, s *pairSession, ident syncnode.Identity
 	}
 	h.log.Info("nodehub: watch added", "watch", ident.Address, "unit", rec.Unit, "owner", owner)
 	s.mu.Lock()
-	s.v.DeviceID = dev.ID
+	s.v.DeviceID = id
 	s.mu.Unlock()
 	s.end(PairDone, "", "")
 	s.mu.Lock()
@@ -577,31 +624,17 @@ func (h *Hub) closeIdleLive() {
 	}
 }
 
-// ownerFlag says who owns the watch at addr now, seen from owner.
-func (h *Hub) ownerFlag(ctx context.Context, addr string, owner int64) string {
-	var dev store.Device
-	err := store.ErrNotFound
-	if w, werr := h.opt.Watches(); werr == nil {
-		if rec, ok := w[addr]; ok {
-			dev, err = h.st.DeviceByUnit(ctx, rec.Unit)
-		}
+// ownerFlags asks whose the watches at addrs are, seen from owner, with the unit numbers
+// node.json knows.
+func (h *Hub) ownerFlags(ctx context.Context, owner int64, addrs []string) (map[string]string, error) {
+	known, _ := h.opt.Watches()
+	cs := make([]PairCandidate, 0, len(addrs))
+	for _, a := range addrs {
+		cs = append(cs, PairCandidate{Address: a, Unit: known[a].Unit})
 	}
-	if errors.Is(err, store.ErrNotFound) {
-		dev, err = h.st.DeviceByAddress(ctx, addr)
-	}
-	if err != nil {
-		return OwnerNew
-	}
-	u, err := h.st.Owner(ctx, dev.ID, time.Now().Unix())
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return OwnerNobody
-	case err != nil:
-		return OwnerNew
-	case u == owner:
-		return OwnerYours
-	}
-	return OwnerOther
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return h.pb.OwnerFlags(ctx, owner, cs)
 }
 
 // end puts the session in a final state and stops its Bluetooth work. It reports false if the
@@ -665,6 +698,7 @@ func (s *pairSession) viewLocked() PairView {
 
 // notifyLocked hands every stream the current view, replacing one it has not read yet.
 func (s *pairSession) notifyLocked() {
+	s.v.Version++
 	v := s.viewLocked()
 	for ch := range s.subs {
 		select {
@@ -797,10 +831,17 @@ func (s *pairSession) list(ctx context.Context, devs []bluez.Device) {
 			unknown = append(unknown, d.Address)
 		}
 	}
+	ask := len(unknown) > 0 && !s.h.opt.Clock.Now().Before(s.flagsRetry)
 	s.mu.Unlock()
-	flags := map[string]string{}
-	for _, a := range unknown {
-		flags[a] = s.h.ownerFlag(ctx, a, owner)
+	var flags map[string]string
+	if ask {
+		var err error
+		if flags, err = s.h.ownerFlags(ctx, owner, unknown); err != nil && ctx.Err() == nil {
+			s.h.log.Info("nodehub: looking up the listed watches", "err", err)
+			s.mu.Lock()
+			s.flagsRetry = s.h.opt.Clock.Now().Add(10 * time.Second) // not on every scan tick
+			s.mu.Unlock()
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -811,8 +852,12 @@ func (s *pairSession) list(ctx context.Context, devs []bluez.Device) {
 	byAddr := make(map[string]bluez.Device, len(devs))
 	for _, d := range devs {
 		byAddr[d.Address] = d
+		flag := s.owners[d.Address]
+		if flag == "" {
+			flag = OwnerNew // not looked up yet (the server did not answer): the setup decides
+		}
 		ws = append(ws, PairWatch{Address: d.Address, Name: d.DisplayName(), RSSI: d.RSSI, SeenNow: d.HasRSSI,
-			PairedHere: d.Bonded, Owner: s.owners[d.Address]})
+			PairedHere: d.Bonded, Owner: flag})
 	}
 	sort.SliceStable(ws, func(i, j int) bool {
 		if ws[i].SeenNow != ws[j].SeenNow {
@@ -886,7 +931,10 @@ func (s *pairSession) pairAndIdentify(dev bluez.Device, repair bool) {
 		s.scan()
 		return
 	}
-	ownership, former, cur, err := s.h.identifiedOwner(s.ctx, ident.Record.Unit, s.owner)
+	ictx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
+	who, err := s.h.pb.Identified(ictx, s.owner, ident.Record.Unit)
+	cancel()
+	ownership, former := who.Ownership, who.Former
 	if err != nil {
 		s.mu.Lock()
 		s.setErrorLocked(CodeIdentify, "goarmin could not look the watch up: "+err.Error(), true)
@@ -912,38 +960,12 @@ func (s *pairSession) pairAndIdentify(dev bluez.Device, repair bool) {
 		Firmware: ident.Record.Firmware, Battery: ident.Battery.Percent}
 	s.v.Ownership, s.v.FormerOwner = ownership, former
 	if ownership == OwnerYours {
-		s.v.Nickname, s.v.AfterFetch = cur.Nickname, cur.AfterFetch
+		s.v.Nickname, s.v.AfterFetch = who.Nickname, who.AfterFetch
 	}
 	for i := range s.v.Steps {
 		s.v.Steps[i].Done = true
 	}
 	s.notifyLocked()
-}
-
-// identifiedOwner says who owns the watch with this unit number now, seen from owner; former
-// reports another account had it before.
-func (h *Hub) identifiedOwner(ctx context.Context, unit uint32, owner int64) (string, bool, store.Device, error) {
-	dev, err := h.st.DeviceByUnit(ctx, unit)
-	if errors.Is(err, store.ErrNotFound) {
-		return OwnerNew, false, store.Device{}, nil
-	}
-	if err != nil {
-		return "", false, dev, err
-	}
-	former, err := h.st.HadOtherOwner(ctx, dev.ID, owner)
-	if err != nil {
-		return "", false, dev, err
-	}
-	u, err := h.st.Owner(ctx, dev.ID, time.Now().Unix())
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return OwnerNobody, former, dev, nil
-	case err != nil:
-		return "", false, dev, err
-	case u == owner:
-		return OwnerYours, former, dev, nil
-	}
-	return OwnerOther, former, dev, nil
 }
 
 // step ticks an identify step off.

@@ -8,12 +8,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { errorText } from '../../../api/client'
 import { useMe } from '../../../api/hooks/auth'
 import {
-  useCancelPairing, usePairConfirm, usePairPasskey, usePairScan, usePairSelect, usePairSetup, usePairing, useStartPairing,
+  useCancelPairing, usePairComputers, usePairConfirm, usePairPasskey, usePairScan, usePairSelect, usePairSetup, usePairing,
+  useStartPairing,
 } from '../../../api/hooks/pairing'
 import { keys } from '../../../api/keys'
 import type { PairView } from '../../../api/types'
 import { HeaderActions, useSectionTitle } from '../../../app/section/HeaderSlot'
-import { isOver, pairSteps, stepOf } from '../../../lib/pairing'
+import { defaultComputer, isOver, pairSteps, stepOf } from '../../../lib/pairing'
 import { Button, Notice, Spinner } from '../../../ui/kit'
 import { Confirm as ConfirmDialog } from '../../../ui/Sheet'
 import { useToast } from '../../../ui/Toast'
@@ -54,7 +55,11 @@ export default function AddWatch() {
   const setup = usePairSetup()
   const cancel = useCancelPairing()
   const [owner, setOwner] = useState(() => (me.is_admin ? Number(params.get('for')) || 0 : 0))
+  const [node, setNode] = useState<number | null>(null)
   const [asking, setAsking] = useState(false)
+  // The computers that can pair for the owner, until a session runs on one of them.
+  const computers = usePairComputers(owner || me.id, !q.isPending && !q.data)
+  const chosen = computers.data?.find((c) => c.node === node) ?? defaultComputer(computers.data ?? [])
 
   const step = stepOf(view)
   // Each screen change moves the focus to its heading, so a screen reader hears where it is.
@@ -108,8 +113,10 @@ export default function AddWatch() {
   } else if (step === 0) {
     body = (
       <Prepare me={me} view={view} owner={owner} setOwner={setOwner} starting={start.isPending}
+        computers={view ? undefined : computers.data} chosen={chosen} setNode={setNode}
         startError={start.isError ? errorText(start.error) : ''}
-        onStart={() => start.mutate(owner && owner !== me.id ? owner : undefined)} />
+        onStart={() => start.mutate({ owner: owner && owner !== me.id ? owner : undefined,
+          node: chosen && !chosen.here ? chosen.node : undefined })} />
     )
   } else if (step === 1) {
     body = (

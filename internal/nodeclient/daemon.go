@@ -52,10 +52,14 @@ type node struct {
 	hub   *nodehub.Hub
 	hello chan struct{}
 
-	mu      sync.Mutex
-	lives   map[string]*nodehub.Viewer
-	online  bool
-	stopped bool
+	mu        sync.Mutex
+	lives     map[string]*nodehub.Viewer
+	online    bool
+	stopped   bool
+	following string // the pairing session whose changes go to the server
+
+	hubDone   chan struct{}  // closed once the hub has stopped (it ends a running pairing session)
+	followers sync.WaitGroup // follow goroutines: Run waits for their last push
 }
 
 // Run runs the node until ctx ends or the server revokes its sign-in.
@@ -84,7 +88,7 @@ func Run(ctx context.Context, opt Options) error {
 		return err
 	}
 	n := &node{opt: opt, log: opt.Logger, c: c, be: NewRemote(c, opt.DataDir, opt.Logger), hello: make(chan struct{}, 1),
-		lives: map[string]*nodehub.Viewer{}}
+		lives: map[string]*nodehub.Viewer{}, hubDone: make(chan struct{})}
 	hopt := nodehub.Options{DataDir: opt.DataDir, Adapter: opt.Adapter, Interval: opt.Interval, Backend: n.be,
 		Logger: opt.Logger, Features: opt.Features, NoArchive: opt.NoArchive}
 	if opt.Hub != nil {
@@ -97,7 +101,11 @@ func Run(ctx context.Context, opt Options) error {
 	n.sayHello(ctx) // before the hub's first sync, so it has the server's config
 	var wg sync.WaitGroup
 	wg.Add(4)
-	go func() { defer wg.Done(); n.hub.Run(ctx) }()
+	go func() {
+		defer wg.Done()
+		n.hub.Run(ctx)
+		close(n.hubDone)
+	}()
 	go func() { defer wg.Done(); n.helloLoop(ctx) }()
 	go func() { defer wg.Done(); n.progressLoop(ctx) }()
 	go func() {
@@ -115,6 +123,7 @@ func Run(ctx context.Context, opt Options) error {
 	}
 	n.mu.Unlock()
 	wg.Wait()
+	n.followers.Wait() // a pairing session the hub ended on the way out reaches the server
 	if err := context.Cause(ctx); errors.Is(err, ErrRevoked) {
 		return err
 	}
@@ -254,6 +263,32 @@ func (n *node) run(ctx context.Context, cmd nodeproto.Command) {
 		}
 	case nodeproto.CmdHello:
 		n.askHello()
+	case nodeproto.CmdPairStart:
+		v, created, err := n.hub.StartPairing(cmd.Starter, cmd.Owner)
+		res = nodes.ResultFor(err)
+		if err == nil {
+			res.Pairing, res.Created = &v, created
+			n.follow(v.ID)
+		}
+	case nodeproto.CmdPairScan:
+		res = n.pairStep(cmd, n.hub.PairScan(cmd.Session, cmd.User))
+	case nodeproto.CmdPairSelect:
+		res = n.pairStep(cmd, n.hub.PairSelect(cmd.Session, cmd.User, cmd.Address, cmd.Repair))
+	case nodeproto.CmdPairConfirm:
+		res = n.pairStep(cmd, n.hub.PairConfirm(cmd.Session, cmd.User, cmd.Match))
+	case nodeproto.CmdPairPasskey:
+		res = n.pairStep(cmd, n.hub.PairPasskey(cmd.Session, cmd.User, cmd.Passkey))
+	case nodeproto.CmdPairSetup:
+		if cmd.Setup == nil {
+			res = nodeproto.CommandResult{Code: nodeproto.CodeFailed, Error: "the setup is missing"}
+			break
+		}
+		_, err := n.hub.PairSetup(ctx, cmd.Session, cmd.User, *cmd.Setup)
+		res = n.pairStep(cmd, err)
+	case nodeproto.CmdPairCancel:
+		res = n.pairStep(cmd, n.hub.CancelPairing(cmd.Session, cmd.User, cmd.Admin))
+	case nodeproto.CmdPairTouch: // with the session, so the server catches up on a change it missed
+		res = n.pairStep(cmd, n.hub.PairTouch(cmd.Session))
 	default:
 		res = nodeproto.CommandResult{Code: nodeproto.CodeFailed, Error: "this node does not know the command " + cmd.Kind}
 	}
@@ -262,6 +297,85 @@ func (n *node) run(ctx context.Context, cmd nodeproto.Command) {
 	if err := n.c.Result(rctx, cmd.ID, res); err != nil {
 		n.log.Info("node: answering a command", "kind", cmd.Kind, "err", err)
 	}
+}
+
+// pairStep answers a pairing step with its error and the session as it is now.
+func (n *node) pairStep(cmd nodeproto.Command, err error) nodeproto.CommandResult {
+	res := nodes.ResultFor(err)
+	if v, verr := n.hub.PairingView(cmd.Session); verr == nil {
+		res.Pairing = &v
+	}
+	return res
+}
+
+// follow sends the pairing session id to the server after each change, until it ends; a watch
+// added makes the node say hello at once.
+func (n *node) follow(id string) {
+	n.mu.Lock()
+	if n.following == id {
+		n.mu.Unlock()
+		return
+	}
+	n.following = id
+	n.mu.Unlock()
+	ch, stop, err := n.hub.PairFollow(id)
+	if err != nil {
+		return
+	}
+	n.followers.Add(1)
+	go func() {
+		defer n.followers.Done()
+		defer stop()
+		defer func() {
+			n.mu.Lock()
+			if n.following == id {
+				n.following = ""
+			}
+			n.mu.Unlock()
+		}()
+		stopping := func() bool {
+			select {
+			case <-n.hubDone:
+				return true
+			default:
+				return false
+			}
+		}
+		for {
+			var v nodehub.PairView
+			select {
+			case v = <-ch:
+			case <-n.hubDone: // the node stops: the hub has ended the session, its last view waits
+				select {
+				case v = <-ch:
+				default:
+					return
+				}
+			}
+			for try := 0; ; try++ {
+				pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				err := n.c.PairView(pctx, v)
+				cancel()
+				if err == nil || try >= 5 || stopping() {
+					if err != nil {
+						n.log.Info("node: sending the pairing session", "err", err)
+					}
+					break
+				}
+				select { // a newer view replaces the one that did not get through
+				case nv := <-ch:
+					v = nv
+				case <-time.After(time.Second):
+				}
+			}
+			if v.Terminal() {
+				if v.State == nodehub.PairDone {
+					n.askHello()
+				}
+				return
+			}
+		}
+	}()
 }
 
 // liveStart opens the watch's live link and relays its readings to the server.

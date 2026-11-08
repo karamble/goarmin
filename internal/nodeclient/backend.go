@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,8 +38,9 @@ type Remote struct {
 }
 
 var (
-	_ nodehub.Backend = (*Remote)(nil)
-	_ nodehub.Hander  = (*Remote)(nil)
+	_ nodehub.Backend     = (*Remote)(nil)
+	_ nodehub.Hander      = (*Remote)(nil)
+	_ nodehub.PairBackend = (*Remote)(nil)
 )
 
 // NewRemote makes the backend; it starts from the cached config, if any.
@@ -194,4 +196,31 @@ func (r *Remote) flush(ctx context.Context) {
 func (r *Remote) History(ctx context.Context, rec syncnode.WatchRecord, _ int) ([]store.SyncRun, error) {
 	h, err := r.c.History(ctx, rec.Unit)
 	return h.Runs, err
+}
+
+// OwnerFlags implements nodehub.PairBackend: the server decides whose a listed watch is.
+func (r *Remote) OwnerFlags(ctx context.Context, owner int64, ws []nodehub.PairCandidate) (map[string]string, error) {
+	return r.c.PairOwners(ctx, nodeproto.PairOwnersRequest{Owner: owner, Watches: ws})
+}
+
+// Identified implements nodehub.PairBackend.
+func (r *Remote) Identified(ctx context.Context, owner int64, unit uint32) (nodehub.IdentifiedOwner, error) {
+	return r.c.PairIdentified(ctx, nodeproto.PairIdentifiedRequest{Owner: owner, Unit: unit})
+}
+
+// Claim implements nodehub.PairBackend: the server adds the watch to the owner's account and
+// says how to sync it, so its first sync runs before the next hello.
+func (r *Remote) Claim(ctx context.Context, c nodehub.PairClaim) (int64, error) {
+	res, err := r.c.PairClaim(ctx, c)
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status == http.StatusConflict {
+		return 0, nodehub.ErrOwnedElsewhere
+	}
+	if err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	r.config[res.Watch.Address] = res.Watch
+	r.mu.Unlock()
+	return res.DeviceID, nil
 }

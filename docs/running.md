@@ -83,9 +83,13 @@ make node-logs / node-stop / node-restart
   typing `SERVER=` each time.
 - In a container: `docker/compose.syncer.yaml` ([docker/README.md](../docker/README.md)).
 
-Adding a new watch (the pairing wizard) still runs where the server has the sync role itself. With
-only sync nodes, pair the watch on the node's computer (`goarmin pair`); it appears on the server
-with its first sync.
+**Adding a watch through a node.** *Devices › Add a watch* works on a server without Bluetooth as
+soon as a sync node is online: the node scans and pairs over its own Bluetooth, and the code, the
+steps and the setup show in your browser. Whose the watch is, and its settings, are decided on
+the server; the pairing and `node.json` stay on the node, which syncs the watch from then on.
+With several nodes (or this server's own sync role too), the wizard asks which computer pairs.
+A node pairs for its own account, or for anyone if an admin signed it in. If the node goes
+offline mid-way, the wizard says so and offers to start again.
 
 ## Docker
 

@@ -133,9 +133,9 @@ sequenceDiagram
   calories and floors stream to every viewer over Server-Sent Events, with the last 10 minutes
   replayed. The link closes 30 seconds after the last viewer leaves, and after 30 minutes at
   most.
-- **Pairing.** A server-side session that the browser follows over SSE. Ownership is decided
-  before anything is saved: a watch that belongs to another account is refused without naming
-  it.
+- **Pairing.** A session on the computer with Bluetooth (this server, or a sync node relayed
+  by the server) that the browser follows over SSE. Ownership is decided on the server before
+  anything is saved: a watch that belongs to another account is refused without naming it.
 
 ```mermaid
 stateDiagram-v2
@@ -208,6 +208,37 @@ sequenceDiagram
 - **Sign-in.** `goarmin node login` with the account's password, or a code approved in the
   dashboard, gives the node a token (stored as SHA-256 in `sync_nodes`); signing a node out
   revokes it at once.
+- **Add a watch through a node.** The pairing session runs on the node, which holds the
+  Bluetooth; its three touches of the database (whose the listed watches are, whose the
+  identified watch is, adding it to an account) go through a `PairBackend`: `nodehub.Local`
+  in the server, `nodeclient.Remote` on a node (the node API's pairing routes, answered only
+  within a session the node runs). The registry keeps a mirror of the session for the browser:
+  each step becomes a command, the node pushes each change (versioned, so an older copy never
+  replaces a newer one), and a node that goes silent ends the mirror as failed. The claim's
+  answer carries the watch's sync config, so the first sync runs at once on the node.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant UI as Dashboard
+  participant Server as Server (registry, node API)
+  participant Node as Sync node (hub, Remote)
+  participant Watch
+  UI->>Server: POST /api/pairing {node}
+  Server-->>Node: pair_start (long poll)
+  Node-->>Server: the session, then each change → POST /pairing
+  UI->>Server: scan, select
+  Server-->>Node: pair_scan, pair_select
+  Node->>Server: POST /pairing/owners (whose the listed watches are)
+  Node->>Watch: pair (the code shows in the browser)
+  UI->>Server: confirm
+  Server-->>Node: pair_confirm
+  Node->>Server: POST /pairing/identified
+  UI->>Server: setup
+  Server-->>Node: pair_setup
+  Node->>Server: POST /pairing/claim → device, sync config
+  Node->>Watch: node.json, first sync
+```
 
 ## Imports
 

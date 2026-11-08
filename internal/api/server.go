@@ -199,6 +199,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/devices/{id}/forget", s.needAdmin(s.adminForget))
 	mux.HandleFunc("POST /api/pairing", s.needUser(s.startPairing))
 	mux.HandleFunc("GET /api/pairing", s.needUser(s.myPairing))
+	mux.HandleFunc("GET /api/pairing/computers", s.needUser(s.pairComputers))
 	mux.HandleFunc("GET /api/pairing/{id}", s.needUser(s.getPairing))
 	mux.HandleFunc("GET /api/pairing/{id}/events", s.needUser(s.pairingEvents))
 	mux.HandleFunc("POST /api/pairing/{id}/scan", s.needUser(s.pairingScan))

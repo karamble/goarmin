@@ -6,25 +6,29 @@ import { Bluetooth, BluetoothOff } from 'lucide-react'
 import { useBluetooth, usePowerOn } from '../../api/hooks/devices'
 import { errorText } from '../../api/client'
 import { timeOfDay } from '../../lib/format'
+import { computer } from '../../lib/pairing'
 
 const busyText = { sync: 'syncing a watch', live: 'streaming live values', pairing: 'adding a watch' } as const
 
-/** BluetoothStrip is this computer's adapter: on, off (Turn on) or blocked by the system. */
-export function BluetoothStrip({ tz }: { tz: string }) {
-  const q = useBluetooth(true)
-  const power = usePowerOn()
+/** BluetoothStrip is the sync computer's adapter (node: a sync node's, by name): on, off (Turn
+ * on) or blocked by the system. */
+export function BluetoothStrip({ tz, node = 0, name }: { tz: string; node?: number; name?: string }) {
+  const q = useBluetooth(true, node)
+  const power = usePowerOn(node)
+  const where = computer(name)
   const b = q.data
   if (!b) return null
   const on = b.available && b.power_state === 'on'
   const blocked = b.power_state === 'off-blocked'
   return (
-    <section aria-label="Bluetooth on this computer"
+    <section aria-label={`Bluetooth on ${where}`}
       className={`card flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 ${on ? '' : 'border-amber/50'}`}>
       {on ? <Bluetooth size={18} className="text-lime" aria-hidden /> : <BluetoothOff size={18} className="text-amber" aria-hidden />}
       <div className="min-w-0 flex-1">
         <p className="m-0 text-[14px]">
-          {!b.available ? 'Bluetooth is not reachable on this computer'
-            : on ? 'Bluetooth is on' : blocked ? 'Bluetooth is blocked on this computer' : 'Bluetooth is off'}
+          {!b.available ? `Bluetooth is not reachable on ${where}`
+            : blocked ? `Bluetooth is blocked on ${where}`
+            : `${name ? `Bluetooth on ${name}` : 'Bluetooth'} is ${on ? 'on' : 'off'}`}
           {b.adapter && <span className="ml-2 font-mono text-[12px] text-faint">{b.adapter} · {b.address}</span>}
         </p>
         <p className="m-0 text-[12px] text-muted">

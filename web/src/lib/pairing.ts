@@ -2,7 +2,23 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import type { Device, PairState, PairView, PairWatch } from '../api/types'
+import type { Device, PairComputer, PairState, PairView, PairWatch } from '../api/types'
+
+/** computer names the computer that pairs in a sentence: a sync node by its name, else "this
+ * computer" (the server pairs itself). */
+export function computer(name?: string | null): string {
+  return name || 'this computer'
+}
+
+/** defaultComputer is the one Prepare offers first: this server, else a node with Bluetooth on. */
+export function defaultComputer(cs: PairComputer[]): PairComputer | undefined {
+  return cs.find((c) => c.here) ?? cs.find((c) => c.adapter?.power_state === 'on') ?? cs[0]
+}
+
+/** computerLabel is a computer in the Pair with choice. */
+export function computerLabel(c: PairComputer): string {
+  return c.here ? 'This server' : c.name
+}
 
 /** The wizard's steps, in order. */
 export const pairSteps = ['Prepare', 'Find', 'Confirm', 'Set up', 'First sync'] as const
@@ -60,10 +76,10 @@ export interface Flag {
 }
 
 /** flagOf says what a listed watch is to the person adding it. */
-export function flagOf(w: Pick<PairWatch, 'owner' | 'paired_here'>): Flag {
+export function flagOf(w: Pick<PairWatch, 'owner' | 'paired_here'>, name?: string | null): Flag {
   if (w.owner === 'other') return { text: 'Belongs to another account', tone: 'amber', disabled: true }
-  if (w.owner === 'yours') return { text: w.paired_here ? 'Already yours · paired with this computer' : 'Already yours', tone: 'muted' }
-  if (w.paired_here) return { text: 'Paired with this computer', tone: 'muted' }
+  if (w.owner === 'yours') return { text: w.paired_here ? `Already yours · paired with ${computer(name)}` : 'Already yours', tone: 'muted' }
+  if (w.paired_here) return { text: `Paired with ${computer(name)}`, tone: 'muted' }
   if (w.owner === 'nobody') return { text: 'Ready to add', tone: 'lime' }
   return { text: 'New', tone: 'lime' }
 }
@@ -79,7 +95,8 @@ export function codeSpoken(code: string): string {
 }
 
 /** pairHint is what a pairing error means and what to do next. */
-export function pairHint(code: string | null | undefined): string {
+export function pairHint(code: string | null | undefined, name?: string | null): string {
+  const here = computer(name)
   switch (code) {
     case 'mismatch':
       return 'The codes did not match, so the pairing was refused. Choose the watch again; if the codes differ again, it may be another watch nearby.'
@@ -88,40 +105,44 @@ export function pairHint(code: string | null | undefined): string {
     case 'auth_failed':
       return 'The watch refused the pairing or gave up. Open Pair Phone on the watch again, then choose it here.'
     case 'connect_failed':
-      return 'goarmin could not connect to the watch. Keep it close to this computer and try again.'
+      return `goarmin could not connect to the watch. Keep it close to ${here} and try again.`
     case 'gone':
       return 'The watch is no longer visible. Open Pair Phone on the watch again; it shows up in the list by itself.'
     case 'in_progress':
       return 'Another pairing with this watch is running. Wait a moment and try again.'
     case 'adapter_off':
-      return 'Bluetooth is off on this computer. Turn it on, then scan again.'
+      return `Bluetooth is off on ${here}. Turn it on, then scan again.`
     case 'not_bonded':
       return 'The watch paired but kept no pairing. Choose it again with Pair again.'
     case 'identify':
       return 'The watch is paired, but goarmin could not talk to it yet. Choose it again to retry.'
     case 'scan':
-      return 'Searching for watches failed. Scan again; if it keeps failing, check Bluetooth on this computer.'
+      return `Searching for watches failed. Scan again; if it keeps failing, check Bluetooth on ${here}.`
     case 'busy':
       return 'Another goarmin command is using Bluetooth. Try again when it has finished.'
     case 'owned_elsewhere':
       return 'This watch belongs to another account on this server. Its owner can hand it over under Devices › the watch › Remove; then it can be added here.'
     case 'stopping':
-      return 'The server is stopping. Start again once it is back.'
+      return name ? `The sync node on ${name} is stopping. Start again once it runs (make node-start).` : 'The server is stopping. Start again once it is back.'
+    case 'node_offline':
+      return `${name ? `${name}, the computer that pairs,` : 'The computer that pairs'} went offline. Start again once its sync node runs (make node-start).`
+    case 'node_gone':
+      return `${name ? `${name}, the computer that pairs,` : 'The computer that pairs'} no longer has this attempt (it restarted, or was signed out). Start again.`
   }
   return ''
 }
 
 /** endTitle and endText describe a session that ended without adding a watch. */
-export function endText(v: Pick<PairView, 'state' | 'error_code' | 'error'>): { title: string; text: string } {
+export function endText(v: Pick<PairView, 'state' | 'error_code' | 'error'> & { node?: PairView['node'] }): { title: string; text: string } {
   switch (v.state) {
     case 'canceled':
       return v.error_code === 'stopping'
-        ? { title: 'Stopped', text: pairHint('stopping') }
+        ? { title: 'Stopped', text: pairHint('stopping', v.node?.name) }
         : { title: 'Cancelled', text: 'Adding the watch was cancelled. If it was paired already, the next try skips the code.' }
     case 'expired':
       return { title: 'Timed out', text: v.error || 'This took too long, so it stopped. Start again when the watch is ready.' }
   }
-  return { title: 'Not added', text: pairHint(v.error_code) || v.error || 'The watch could not be added.' }
+  return { title: 'Not added', text: pairHint(v.error_code, v.node?.name) || v.error || 'The watch could not be added.' }
 }
 
 /** firstSyncDone tells whether the first sync after the setup has finished (it started after the session did). */
@@ -131,14 +152,14 @@ export function firstSyncDone(d: Pick<Device, 'sync'> | undefined, v: Pick<PairV
 }
 
 /** bondText says how the watch came to be paired. */
-export function bondText(bond: PairView['bond']): string {
+export function bondText(bond: PairView['bond'], name?: string | null): string {
   switch (bond) {
     case 'existing':
-      return 'Uses the pairing this computer already had with the watch; no new pairing was needed.'
+      return `Uses the pairing ${computer(name)} already had with the watch; no new pairing was needed.`
     case 'code':
       return 'Paired just now, with the code confirmed on both sides.'
     case 'no_code':
-      return 'Paired just now without a code: the watch did not ask for one (it may have known this computer already).'
+      return `Paired just now without a code: the watch did not ask for one (it may have known ${computer(name)} already).`
   }
   return ''
 }

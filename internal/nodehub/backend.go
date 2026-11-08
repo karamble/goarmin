@@ -141,6 +141,143 @@ func (l Local) History(ctx context.Context, rec syncnode.WatchRecord, n int) ([]
 	return l.In.Store.RecentSyncRuns(ctx, dev.ID, n)
 }
 
+// PairBackend is where Add a watch learns whose a watch is and adds it to an account: the
+// server's own database (Local), or on a sync node the server over HTTP. A hub pairs only with
+// one. Ownership is always decided where the database is, before anything is saved.
+type PairBackend interface {
+	// OwnerFlags says for each listed watch whose it is now, seen from owner (Owner*), by
+	// address.
+	OwnerFlags(ctx context.Context, owner int64, ws []PairCandidate) (map[string]string, error)
+	// Identified says whose the watch with this unit number is now, seen from owner, and the
+	// current settings of one that is owner's already.
+	Identified(ctx context.Context, owner int64, unit uint32) (IdentifiedOwner, error)
+	// Claim adds the identified watch to owner's account with its settings and returns its
+	// device id; ErrOwnedElsewhere when another account owns it now.
+	Claim(ctx context.Context, c PairClaim) (int64, error)
+}
+
+// PairCandidate is a listed watch: its address, and its unit number if this computer synced it
+// before (0 otherwise).
+type PairCandidate struct {
+	Address string `json:"address"`
+	Unit    uint32 `json:"unit,omitempty"`
+}
+
+// IdentifiedOwner is whose an identified watch is: Ownership is OwnerNew, OwnerNobody,
+// OwnerYours or OwnerOther; Former says another account had it before. Nickname and AfterFetch
+// are the settings of a watch that is owner's already.
+type IdentifiedOwner struct {
+	Ownership  string `json:"ownership"`
+	Former     bool   `json:"former_owner"`
+	Nickname   string `json:"nickname,omitempty"`
+	AfterFetch string `json:"after_fetch,omitempty"`
+}
+
+// PairClaim is the Set up step: the identified watch, for whom, with which settings.
+type PairClaim struct {
+	Owner      int64                `json:"owner"`
+	Address    string               `json:"address"`
+	Record     syncnode.WatchRecord `json:"record"`
+	Battery    watch.Battery        `json:"battery"`
+	Nickname   string               `json:"nickname"`
+	AfterFetch string               `json:"after_fetch"`
+}
+
+var _ PairBackend = Local{}
+
+// OwnerFlags implements PairBackend.
+func (l Local) OwnerFlags(ctx context.Context, owner int64, ws []PairCandidate) (map[string]string, error) {
+	st := l.In.Store
+	out := make(map[string]string, len(ws))
+	for _, c := range ws {
+		var dev store.Device
+		err := store.ErrNotFound
+		if c.Unit != 0 {
+			dev, err = st.DeviceByUnit(ctx, c.Unit)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			dev, err = st.DeviceByAddress(ctx, c.Address)
+		}
+		if err != nil {
+			out[c.Address] = OwnerNew
+			continue
+		}
+		u, err := st.Owner(ctx, dev.ID, time.Now().Unix())
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			out[c.Address] = OwnerNobody
+		case err != nil:
+			out[c.Address] = OwnerNew
+		case u == owner:
+			out[c.Address] = OwnerYours
+		default:
+			out[c.Address] = OwnerOther
+		}
+	}
+	return out, nil
+}
+
+// Identified implements PairBackend.
+func (l Local) Identified(ctx context.Context, owner int64, unit uint32) (IdentifiedOwner, error) {
+	st := l.In.Store
+	dev, err := st.DeviceByUnit(ctx, unit)
+	if errors.Is(err, store.ErrNotFound) {
+		return IdentifiedOwner{Ownership: OwnerNew}, nil
+	}
+	if err != nil {
+		return IdentifiedOwner{}, err
+	}
+	former, err := st.HadOtherOwner(ctx, dev.ID, owner)
+	if err != nil {
+		return IdentifiedOwner{}, err
+	}
+	u, err := st.Owner(ctx, dev.ID, time.Now().Unix())
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return IdentifiedOwner{Ownership: OwnerNobody, Former: former}, nil
+	case err != nil:
+		return IdentifiedOwner{}, err
+	case u == owner:
+		return IdentifiedOwner{Ownership: OwnerYours, Former: former, Nickname: dev.Nickname, AfterFetch: dev.AfterFetch}, nil
+	}
+	return IdentifiedOwner{Ownership: OwnerOther, Former: former}, nil
+}
+
+// Claim implements PairBackend.
+func (l Local) Claim(ctx context.Context, c PairClaim) (int64, error) {
+	st := l.In.Store
+	rec := c.Record
+	dev, err := st.EnsureDevice(ctx, store.Device{UnitID: rec.Unit, Product: rec.Product, Name: rec.Name,
+		Firmware: rec.Firmware, Address: c.Address})
+	if err != nil {
+		return 0, err
+	}
+	cur, err := st.Owner(ctx, dev.ID, time.Now().Unix()) // ownership is wall time, like the store's
+	switch {
+	case err == nil && cur == c.Owner:
+	case err == nil:
+		return 0, ErrOwnedElsewhere
+	case errors.Is(err, store.ErrNotFound):
+		if err := st.ClaimDevice(ctx, dev.ID, c.Owner); errors.Is(err, store.ErrOwned) {
+			return 0, ErrOwnedElsewhere
+		} else if err != nil {
+			return 0, err
+		}
+	default:
+		return 0, err
+	}
+	if err := st.SetNickname(ctx, dev.ID, c.Nickname); err != nil {
+		return 0, err
+	}
+	if err := st.SetAfterFetch(ctx, dev.ID, c.AfterFetch); err != nil {
+		return 0, err
+	}
+	if b := c.Battery; b.Percent >= 0 && !b.At.IsZero() {
+		_ = st.SetBattery(ctx, dev.ID, b.Percent, b.At)
+	}
+	return dev.ID, nil
+}
+
 // OwnerNow is the device's owner now. A watch nobody ever owned goes to the only account of a
 // single-person server; on a shared server, or after a hand-over, it waits to be added.
 func OwnerNow(ctx context.Context, st *store.Store, dev store.Device) (int64, error) {

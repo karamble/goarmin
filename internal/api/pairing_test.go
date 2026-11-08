@@ -223,6 +223,12 @@ func TestPairingRoutes(t *testing.T) {
 	b.want(404, "GET", "/api/pairing/"+id, nil)
 	b.want(404, "GET", "/api/pairing", nil)
 	b.want(403, "POST", "/api/pairing", map[string]any{"owner": 1})
+	if cs := decodeJSON[[]map[string]any](t, b.want(200, "GET", "/api/pairing/computers", nil)); len(cs) != 1 || cs[0]["here"] != true {
+		t.Fatalf("computers %v, want this server", cs)
+	}
+	b.want(403, "GET", "/api/pairing/computers?owner=1", nil)
+	b.want(404, "GET", "/api/bluetooth?node=5", nil)
+	b.want(404, "POST", "/api/bluetooth/power", map[string]any{"on": true, "node": 5})
 	admin.want(404, "POST", "/api/pairing", map[string]any{"owner": 999})
 	v = decodeJSON[map[string]any](t, admin.want(201, "POST", "/api/pairing", map[string]any{"owner": bu["id"]}))
 	if o := v["owner"].(map[string]any); o["email"] != "b@example.invalid" {

@@ -20,6 +20,7 @@ import (
 
 	"github.com/karamble/goarmin/internal/config"
 	"github.com/karamble/goarmin/internal/nodeclient"
+	"github.com/karamble/goarmin/internal/nodehub"
 	"github.com/karamble/goarmin/internal/nodeproto"
 	"github.com/karamble/goarmin/internal/syncnode"
 	"github.com/karamble/goarmin/pkg/auth"
@@ -268,7 +269,7 @@ func spoolCount(dir string) int {
 }
 
 // runNodeDaemon is goarmin sync -server: the node syncs until stopped.
-func runNodeDaemon(dataDir, server, adapter string, noArchive, features, verbose bool, stdout, stderr io.Writer) int {
+func runNodeDaemon(dataDir, server, adapter string, noArchive, features, fakePairer, verbose bool, stdout, stderr io.Writer) int {
 	a, err := nodeclient.LoadAuth(dataDir)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -289,8 +290,12 @@ func runNodeDaemon(dataDir, server, adapter string, noArchive, features, verbose
 	ctx, stop := signalContext()
 	defer stop()
 	fmt.Fprintf(stdout, "goarmin sync node for %s (Ctrl+C stops it)\n", a.Server)
-	err = nodeclient.Run(ctx, nodeclient.Options{DataDir: dataDir, Adapter: adapter, Version: version, Logger: log,
-		Features: features, NoArchive: noArchive})
+	opt := nodeclient.Options{DataDir: dataDir, Adapter: adapter, Version: version, Logger: log, Features: features, NoArchive: noArchive}
+	if fakePairer {
+		log.Warn("scripted Bluetooth (-fake-pairer): made-up watches, no real syncs")
+		opt.Hub = func(o *nodehub.Options) { *o = nodehub.Scripted(*o) }
+	}
+	err = nodeclient.Run(ctx, opt)
 	if err != nil {
 		fmt.Fprintln(stderr, "goarmin sync:", err)
 		return 1

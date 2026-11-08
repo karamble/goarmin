@@ -48,7 +48,10 @@ type Options struct {
 	// In (Add a watch runs where the server's database is).
 	In      *ingest.Ingester
 	Backend Backend
-	Logger  *slog.Logger
+	// PairBackend decides ownership for Add a watch; nil means the Backend, if it is one (Local
+	// and a sync node's Remote are). Without one the hub does not pair.
+	PairBackend PairBackend
+	Logger      *slog.Logger
 
 	// The Bluetooth side, replaced by tests; nil means syncnode's and BlueZ's.
 	Sync         func(ctx context.Context, opt syncnode.Options) (syncnode.Result, error)
@@ -193,6 +196,7 @@ type Hub struct {
 	opt  Options
 	st   *store.Store // nil on a sync node (no database here)
 	be   Backend
+	pb   PairBackend // nil: this hub does not pair
 	log  *slog.Logger
 	lane chan struct{} // one Bluetooth operation at a time in this process
 	kick chan Request
@@ -286,6 +290,10 @@ func New(opt Options) *Hub {
 		if h.be == nil {
 			h.be = Local{In: opt.In}
 		}
+	}
+	h.pb = opt.PairBackend
+	if pb, ok := h.be.(PairBackend); ok && h.pb == nil {
+		h.pb = pb
 	}
 	return h
 }

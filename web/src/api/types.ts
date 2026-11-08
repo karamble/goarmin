@@ -647,9 +647,20 @@ export interface PairView {
   nickname?: string
   after_fetch?: AfterFetch
   device_id: number | null
+  /** The sync node that pairs (null: this server pairs itself). */
+  node: { id: number; name: string } | null
   adapter: { name: string; powered: boolean; power_state: string; pairable: boolean } | null
   /** Who else holds Bluetooth while this session waits. */
   busy: { kind: 'sync' | 'live' | 'pairing'; since: number } | null
+}
+
+/** A computer that can pair a watch (GET /api/pairing/computers): this server, or a sync node. */
+export interface PairComputer {
+  /** The sync node's id; 0 for this server. */
+  node: number
+  name: string
+  here: boolean
+  adapter: { name: string; powered: boolean; power_state: string; busy: { kind: 'sync' | 'live' | 'pairing'; since: number } | null } | null
 }
 
 /** The running session as admins see it (GET /api/admin/pairing). */

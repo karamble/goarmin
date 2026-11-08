@@ -53,7 +53,7 @@ export function Setup({ me, view, onSetup, busy, error }: {
           <p className="m-0 font-mono text-[11px] uppercase tracking-[.12em] text-faint">
             {id.name} · firmware {id.firmware} · battery {id.battery == null ? '—' : `${id.battery} %`}
           </p>
-          {view.bond && <p className="m-0 mt-2 text-[13px] text-muted">{bondText(view.bond)}</p>}
+          {view.bond && <p className="m-0 mt-2 text-[13px] text-muted">{bondText(view.bond, view.node?.name)}</p>}
         </div>
       </section>
       <section className="card grid gap-4 p-5">

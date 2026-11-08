@@ -455,12 +455,46 @@ func syncRunJSON(x store.SyncRun) map[string]any {
 }
 
 // bluetooth reports this computer's adapter for the Devices page.
-func (s *Server) bluetooth(w http.ResponseWriter, r *http.Request, _ store.User) {
+// computer reads ?node (a sync node the user may pair with; 0 or none: the usual computer).
+func (s *Server) computer(w http.ResponseWriter, r *http.Request, u store.User, node int64) (pairOn, bool) {
+	if node == 0 {
+		return nil, true
+	}
+	po, ok := s.opt.Node.(pairOn)
+	if ok && !u.IsAdmin {
+		ok = false
+		for _, c := range po.PairComputers(r.Context(), u.ID) {
+			ok = ok || c.Node == node
+		}
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "no such computer")
+	}
+	return po, ok
+}
+
+// bluetooth reports the sync computer's Bluetooth: ?node=id for one of the sync nodes.
+func (s *Server) bluetooth(w http.ResponseWriter, r *http.Request, u store.User) {
+	s.bluetoothOf(w, r, u, 0)
+}
+
+func (s *Server) bluetoothOf(w http.ResponseWriter, r *http.Request, u store.User, node int64) {
 	if s.node() == nil {
 		writeError(w, http.StatusServiceUnavailable, "this server does not sync watches (goarmin serve --with-sync)")
 		return
 	}
-	b, err := s.opt.Node.Bluetooth(r.Context())
+	if q := r.URL.Query().Get("node"); q != "" && node == 0 {
+		node, _ = strconv.ParseInt(q, 10, 64)
+	}
+	po, ok := s.computer(w, r, u, node)
+	if !ok {
+		return
+	}
+	get := s.opt.Node.Bluetooth
+	if po != nil {
+		get = func(ctx context.Context) (nodehub.Bluetooth, error) { return po.BluetoothOf(ctx, node) }
+	}
+	b, err := get(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"available": false, "error": err.Error()})
 		return
@@ -477,10 +511,12 @@ func (s *Server) bluetooth(w http.ResponseWriter, r *http.Request, _ store.User)
 	writeJSON(w, http.StatusOK, out)
 }
 
-// bluetoothPower switches the adapter on ({"on": true}); turning it off is not offered.
+// bluetoothPower switches the adapter on ({"on": true}, "node": id for a sync node's); turning
+// it off is not offered.
 func (s *Server) bluetoothPower(w http.ResponseWriter, r *http.Request, u store.User) {
 	var req struct {
-		On bool `json:"on"`
+		On   bool  `json:"on"`
+		Node int64 `json:"node"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -493,11 +529,19 @@ func (s *Server) bluetoothPower(w http.ResponseWriter, r *http.Request, u store.
 		writeError(w, http.StatusServiceUnavailable, "this server does not sync watches (goarmin serve --with-sync)")
 		return
 	}
-	if err := s.opt.Node.PowerOn(r.Context()); err != nil {
+	po, ok := s.computer(w, r, u, req.Node)
+	if !ok {
+		return
+	}
+	on := s.opt.Node.PowerOn
+	if po != nil {
+		on = func(ctx context.Context) error { return po.PowerOnOf(ctx, req.Node) }
+	}
+	if err := on(r.Context()); err != nil {
 		writeError(w, http.StatusConflict, "Bluetooth could not be switched on: "+err.Error())
 		return
 	}
-	s.bluetooth(w, r, u)
+	s.bluetoothOf(w, r, u, req.Node)
 }
 
 func (s *Server) syncRuns(w http.ResponseWriter, r *http.Request, u store.User) {

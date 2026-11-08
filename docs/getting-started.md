@@ -54,7 +54,9 @@ invitation (**Settings › People**).
 
 ## 3. Add your watch
 
-Open **Devices › Add a watch** and follow the steps:
+Open **Devices › Add a watch** and follow the steps. The watch pairs with the computer it is
+near: the one running goarmin, or a sync node signed in to it ([running.md](running.md)); with
+several, the first step asks which.
 
 1. **Prepare.** Bluetooth on, the watch close by. Put the watch in pairing mode; on a Fenix 8:
    hold the middle-left button › Watch Settings › Connectivity › Phone › Pair Phone. Your phone

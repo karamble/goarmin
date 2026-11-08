@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,9 @@ type Options struct {
 	LiveLinger, LiveIdle time.Duration
 	// CallTimeout bounds how long a command waits for the node's answer (30 s).
 	CallTimeout time.Duration
+	// PairTouch is how often a node's pairing session is told someone looks at it here (1 min);
+	// PairKeep is how long an ended one stays readable, so a reload lands on its end (10 min).
+	PairTouch, PairKeep time.Duration
 }
 
 // Registry is the server's view of its sync nodes.
@@ -62,6 +66,10 @@ type Registry struct {
 	mu      sync.Mutex
 	remotes map[int64]*remote
 	byAddr  map[string]int64 // watch address → the node that reported it last
+
+	pairMu   sync.Mutex // one pairing start at a time
+	mirror   *mirror    // the last pairing session that ran on a node
+	starting int64      // the node a pairing start waits for (its pushes are not orphans)
 }
 
 // New builds a registry.
@@ -80,6 +88,12 @@ func New(opt Options) *Registry {
 	}
 	if opt.CallTimeout <= 0 {
 		opt.CallTimeout = 30 * time.Second
+	}
+	if opt.PairTouch <= 0 {
+		opt.PairTouch = time.Minute
+	}
+	if opt.PairKeep <= 0 {
+		opt.PairKeep = 10 * time.Minute
 	}
 	return &Registry{opt: opt, log: opt.Logger, remotes: map[int64]*remote{}, byAddr: map[string]int64{}}
 }
@@ -210,6 +224,9 @@ func (g *Registry) Drop(id int64) {
 	for _, l := range r.lives {
 		l.endLocked(ErrOffline)
 	}
+	if m := g.mirror; m != nil && m.r == r {
+		g.endMirrorLocked(m, nodehub.PairFailed, CodeNodeGone, "The computer that was pairing was signed out. Start again.")
+	}
 	close(r.wake) // a waiting poll returns now; the node's next request learns it was revoked
 	delete(g.remotes, id)
 }
@@ -287,6 +304,15 @@ func (g *Registry) sendLocked(r *remote, cmd nodeproto.Command) {
 	r.wake = make(chan struct{})
 }
 
+// AddWatch routes a watch to the node that just added it (Add a watch), before its next hello.
+func (g *Registry) AddWatch(info NodeInfo, w nodeproto.Watch) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	r := g.nodeLocked(info)
+	r.watches[w.Address] = w
+	g.byAddr[w.Address] = info.ID
+}
+
 // Refresh asks a node to say hello again soon (a watch's config changed).
 func (g *Registry) Refresh(addr string) {
 	g.mu.Lock()
@@ -318,9 +344,39 @@ func resultErr(res nodeproto.CommandResult) error {
 		return &nodehub.BusyError{Holder: h}
 	case nodeproto.CodeUnknown:
 		return nodehub.ErrUnknown
-	default:
-		return errors.New(res.Error)
 	}
+	if err, ok := pairErr(res); ok {
+		return err
+	}
+	return errors.New(res.Error)
+}
+
+// pairCodes are the pairing errors that keep their meaning across the hop.
+var pairCodes = []struct {
+	code string
+	err  error
+}{
+	{nodeproto.CodeNoSession, nodehub.ErrNoSession},
+	{nodeproto.CodeOwnedElsewhere, nodehub.ErrOwnedElsewhere},
+	{nodeproto.CodeNotListed, nodehub.ErrNotListed},
+	{nodeproto.CodePairingActive, nodehub.ErrPairingActive},
+	{nodeproto.CodeStopping, nodehub.ErrStopping},
+	{nodeproto.CodeCannotPair, nodehub.ErrCannotPair},
+}
+
+// pairErr turns a pairing error code back into the hub's error; a wrong state keeps the
+// sentence that says what to do.
+func pairErr(res nodeproto.CommandResult) (error, bool) {
+	if res.Code == nodeproto.CodeWrongState {
+		msg := strings.TrimPrefix(res.Error, nodehub.ErrWrongState.Error())
+		return fmt.Errorf("%w: %s", nodehub.ErrWrongState, strings.TrimPrefix(msg, ": ")), true
+	}
+	for _, c := range pairCodes {
+		if res.Code == c.code {
+			return c.err, true
+		}
+	}
+	return nil, false
 }
 
 // ResultFor turns an error of the node's hub into a command result (the node's side).
@@ -336,9 +392,15 @@ func ResultFor(err error) nodeproto.CommandResult {
 		return nodeproto.CommandResult{Code: nodeproto.CodeBusy, Error: err.Error()}
 	case errors.Is(err, nodehub.ErrUnknown):
 		return nodeproto.CommandResult{Code: nodeproto.CodeUnknown, Error: err.Error()}
-	default:
-		return nodeproto.CommandResult{Code: nodeproto.CodeFailed, Error: err.Error()}
+	case errors.Is(err, nodehub.ErrWrongState):
+		return nodeproto.CommandResult{Code: nodeproto.CodeWrongState, Error: err.Error()}
 	}
+	for _, c := range pairCodes {
+		if errors.Is(err, c.err) {
+			return nodeproto.CommandResult{Code: c.code, Error: err.Error()}
+		}
+	}
+	return nodeproto.CommandResult{Code: nodeproto.CodeFailed, Error: err.Error()}
 }
 
 // --- The API's sync role (api.Node) ---

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Device, PairState } from '../api/types'
-import { bondText, codeGroups, codeSpoken, endText, firstSyncDone, flagOf, isOver, pairHint, signalBars, signalText, stepOf } from './pairing'
+import { bondText, codeGroups, codeSpoken, computer, defaultComputer, endText, firstSyncDone, flagOf, isOver, pairHint, signalBars, signalText, stepOf } from './pairing'
 
 describe('pairing', () => {
   it('maps every state to its step', () => {
@@ -29,6 +29,19 @@ describe('pairing', () => {
     expect(flagOf({ owner: 'new', paired_here: true }).text).toBe('Paired with this computer')
     expect(flagOf({ owner: 'nobody', paired_here: false }).text).toBe('Ready to add')
     expect(flagOf({ owner: 'new', paired_here: false })).toEqual({ text: 'New', tone: 'lime' })
+    expect(flagOf({ owner: 'new', paired_here: true }, 'omarchy').text).toBe('Paired with omarchy')
+  })
+
+  it('names the computer that pairs and picks one first', () => {
+    expect(computer('omarchy')).toBe('omarchy')
+    expect(computer(null)).toBe('this computer')
+    const on = { name: 'hci0', powered: true, power_state: 'on', busy: null }
+    const off = { ...on, powered: false, power_state: 'off' }
+    const a = { node: 3, name: 'a', here: false, adapter: off }
+    const b = { node: 4, name: 'b', here: false, adapter: on }
+    expect(defaultComputer([a, b])?.node).toBe(4)
+    expect(defaultComputer([a, b, { node: 0, name: '', here: true, adapter: null }])?.node).toBe(0)
+    expect(defaultComputer([])).toBeUndefined()
   })
 
   it('shows codes in groups and digit by digit', () => {
@@ -39,11 +52,14 @@ describe('pairing', () => {
 
   it('has a hint for every error code', () => {
     for (const c of ['mismatch', 'timeout', 'auth_failed', 'connect_failed', 'gone', 'in_progress', 'adapter_off', 'not_bonded',
-      'identify', 'scan', 'busy', 'owned_elsewhere', 'stopping']) {
+      'identify', 'scan', 'busy', 'owned_elsewhere', 'stopping', 'node_offline', 'node_gone']) {
       expect(pairHint(c), c).not.toBe('')
     }
     expect(pairHint('nonsense')).toBe('')
     expect(pairHint(null)).toBe('')
+    expect(pairHint('adapter_off', 'omarchy')).toMatch(/off on omarchy/)
+    expect(pairHint('node_offline', 'omarchy')).toMatch(/^omarchy, the computer that pairs, went offline/)
+    expect(endText({ state: 'failed', error_code: 'node_offline', error: 'x', node: { id: 3, name: 'omarchy' } }).text).toMatch(/omarchy/)
     expect(endText({ state: 'failed', error_code: 'owned_elsewhere', error: 'x' }).text).toMatch(/another account/)
     expect(endText({ state: 'canceled', error_code: null, error: null }).title).toBe('Cancelled')
     expect(endText({ state: 'canceled', error_code: 'stopping', error: null }).title).toBe('Stopped')

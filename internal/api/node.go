@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/karamble/goarmin/internal/ingest"
 	"github.com/karamble/goarmin/internal/nodehub"
@@ -49,6 +50,10 @@ func (s *Server) routesNode(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+p+"/commands", s.needNode(s.nodeCommands))
 	mux.HandleFunc("POST "+p+"/commands/{id}", s.needNode(s.nodeResult))
 	mux.HandleFunc("POST "+p+"/live", s.needNode(s.nodeLive))
+	mux.HandleFunc("POST "+p+"/pairing", s.needNode(s.nodePairView))
+	mux.HandleFunc("POST "+p+"/pairing/owners", s.needNode(s.nodePairOwners))
+	mux.HandleFunc("POST "+p+"/pairing/identified", s.needNode(s.nodePairIdentified))
+	mux.HandleFunc("POST "+p+"/pairing/claim", s.needNode(s.nodePairClaim))
 	mux.HandleFunc(p+"/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "no such node route") })
 
 	mux.HandleFunc("GET /api/nodes", s.needUser(s.listNodes))
@@ -444,6 +449,127 @@ func (s *Server) nodeLive(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
 		return
 	}
 	s.opt.Nodes.LiveBatch(nc.info(), req)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Add a watch through a node: the session runs there, ownership is decided here ---
+
+// nodePairSession finds the pairing session the node runs for owner now: the pairing routes
+// answer only within one, for an account the node may sync.
+func (s *Server) nodePairSession(w http.ResponseWriter, nc nodeCtx, owner int64) (nodehub.PairView, bool) {
+	v, ok := s.opt.Nodes.RelayedSession(nc.node.ID)
+	if !ok || v.Owner != owner || !mayRun(nc, owner) {
+		writeError(w, http.StatusForbidden, "this node adds no watch for that account now")
+		return nodehub.PairView{}, false
+	}
+	return v, true
+}
+
+// pairBackend decides ownership for a node's session in this server's database.
+func (s *Server) pairBackend() nodehub.Local {
+	return nodehub.Local{In: &ingest.Ingester{Store: s.st, Blobs: s.blobs, Log: s.log}}
+}
+
+// nodePairOwners says whose the watches a node's session lists are.
+func (s *Server) nodePairOwners(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	var req nodeproto.PairOwnersRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if _, ok := s.nodePairSession(w, nc, req.Owner); !ok {
+		return
+	}
+	if len(req.Watches) > 500 {
+		writeError(w, http.StatusBadRequest, "too many watches at once")
+		return
+	}
+	flags, err := s.pairBackend().OwnerFlags(r.Context(), req.Owner, req.Watches)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nodeproto.PairOwnersResponse{Flags: flags})
+}
+
+// nodePairIdentified says whose the watch a node's session identified is.
+func (s *Server) nodePairIdentified(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	var req nodeproto.PairIdentifiedRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if _, ok := s.nodePairSession(w, nc, req.Owner); !ok {
+		return
+	}
+	who, err := s.pairBackend().Identified(r.Context(), req.Owner, req.Unit)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, who)
+}
+
+// nodePairClaim adds the watch a node's session identified to the owner's account (its Set up
+// step) and routes it to the node, answering with how to sync it. 409: another account owns it.
+func (s *Server) nodePairClaim(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	var c nodehub.PairClaim
+	if !decode(w, r, &c) {
+		return
+	}
+	v, ok := s.nodePairSession(w, nc, c.Owner)
+	if !ok {
+		return
+	}
+	if v.State != nodehub.PairSetup || v.Identified == nil || v.Identified.Unit != c.Record.Unit || v.Selected != c.Address {
+		writeError(w, http.StatusForbidden, "that is not the watch this node is setting up")
+		return
+	}
+	c.Nickname = strings.TrimSpace(c.Nickname)
+	if utf8.RuneCountInString(c.Nickname) > 60 || strings.ContainsAny(c.Nickname, "\x00\r\n") {
+		writeError(w, http.StatusBadRequest, "the name must be at most 60 characters on one line")
+		return
+	}
+	if c.AfterFetch != store.AfterFetchKeep && c.AfterFetch != store.AfterFetchArchive {
+		writeError(w, http.StatusBadRequest, "after_fetch is keep or archive")
+		return
+	}
+	ctx := r.Context()
+	id, err := s.pairBackend().Claim(ctx, c)
+	if errors.Is(err, nodehub.ErrOwnedElsewhere) {
+		writeError(w, http.StatusConflict, "This watch belongs to another account on this server.")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if err := s.st.SetDeviceNode(ctx, id, nc.node.ID); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	dev, err := s.st.DeviceByID(ctx, id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	cfg := nodeproto.WatchConfig{Address: c.Address, Unit: c.Record.Unit, DeviceID: id, Sync: true, Owner: c.Owner,
+		AfterFetch: dev.AfterFetch, Paused: dev.Paused}
+	if loc := nodehub.OwnerZone(ctx, s.st, c.Owner); loc != nil {
+		cfg.Zone = loc.String()
+	}
+	s.opt.Nodes.AddWatch(nc.info(), nodeproto.Watch{Address: c.Address, Unit: c.Record.Unit, Product: c.Record.Product,
+		Name: c.Record.Name, Firmware: c.Record.Firmware})
+	s.log.Info("node: watch added", "node", nc.node.ID, "device", id, "owner", c.Owner)
+	writeJSON(w, http.StatusOK, nodeproto.PairClaimResponse{DeviceID: id, Watch: cfg})
+}
+
+// nodePairView takes the node's pairing session after a change.
+func (s *Server) nodePairView(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	var req nodeproto.PairViewRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	s.opt.Nodes.PairPush(nc.info(), req.View)
 	w.WriteHeader(http.StatusNoContent)
 }
 

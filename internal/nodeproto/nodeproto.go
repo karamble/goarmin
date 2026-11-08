@@ -157,6 +157,16 @@ const (
 	CmdPurge     = "purge"  // empty the watch's spool of fetched files
 	CmdPowerOn   = "power_on"
 	CmdHello     = "hello" // send a hello now (the server's config changed)
+
+	// Add a watch through the node: the session runs on the node, the server relays it.
+	CmdPairStart   = "pair_start"   // Starter, Owner
+	CmdPairScan    = "pair_scan"    // Session, User
+	CmdPairSelect  = "pair_select"  // Session, User, Address, Repair
+	CmdPairConfirm = "pair_confirm" // Session, User, Match
+	CmdPairPasskey = "pair_passkey" // Session, User, Passkey
+	CmdPairSetup   = "pair_setup"   // Session, User, Setup
+	CmdPairCancel  = "pair_cancel"  // Session, User, Admin
+	CmdPairTouch   = "pair_touch"   // Session: someone looks at it on the server
 )
 
 // Command is one thing the server asks the node to do.
@@ -168,6 +178,18 @@ type Command struct {
 	By            string   `json:"by,omitempty"`
 	IncludeSynced bool     `json:"include_synced,omitempty"`
 	Delete        []string `json:"delete,omitempty"`
+
+	// A pairing step: the session, who acts on it (User; Admin for an admin's cancel) and the
+	// step's answer.
+	Session string                    `json:"session,omitempty"`
+	Starter int64                     `json:"starter,omitempty"`
+	Owner   int64                     `json:"owner,omitempty"`
+	User    int64                     `json:"user,omitempty"`
+	Admin   bool                      `json:"admin,omitempty"`
+	Repair  bool                      `json:"repair,omitempty"`
+	Match   bool                      `json:"match,omitempty"`
+	Passkey uint32                    `json:"passkey,omitempty"`
+	Setup   *nodehub.PairSetupRequest `json:"setup,omitempty"`
 }
 
 // CommandsResponse carries the commands waiting for the node (none after CommandWait).
@@ -180,6 +202,15 @@ const (
 	CodeBusy    = "busy"
 	CodeUnknown = "unknown"
 	CodeFailed  = "failed"
+
+	// A pairing step's errors (nodehub.Err*).
+	CodeWrongState     = "wrong_state"
+	CodeNoSession      = "no_session"
+	CodeOwnedElsewhere = "owned_elsewhere"
+	CodeNotListed      = "not_listed"
+	CodePairingActive  = "pairing_active"
+	CodeStopping       = "stopping"
+	CodeCannotPair     = "cannot_pair"
 )
 
 // CommandResult answers a command.
@@ -188,6 +219,40 @@ type CommandResult struct {
 	Code  string                  `json:"code,omitempty"`
 	Busy  *nodehub.Holder         `json:"busy,omitempty"`
 	Files []fileaccess.StoredFile `json:"files,omitempty"`
+	// Pairing is the session after a pairing step; Created says pair_start opened a new one.
+	Pairing *nodehub.PairView `json:"pairing,omitempty"`
+	Created bool              `json:"created,omitempty"`
+}
+
+// PairOwnersRequest asks whose the watches a pairing session lists are, seen from Owner
+// (POST Prefix+"/pairing/owners").
+type PairOwnersRequest struct {
+	Owner   int64                   `json:"owner"`
+	Watches []nodehub.PairCandidate `json:"watches"`
+}
+
+// PairOwnersResponse has nodehub.Owner* by address.
+type PairOwnersResponse struct {
+	Flags map[string]string `json:"flags"`
+}
+
+// PairIdentifiedRequest asks whose the identified watch is (POST Prefix+"/pairing/identified");
+// the answer is a nodehub.IdentifiedOwner.
+type PairIdentifiedRequest struct {
+	Owner int64  `json:"owner"`
+	Unit  uint32 `json:"unit"`
+}
+
+// PairClaimResponse answers a claim (POST Prefix+"/pairing/claim" with a nodehub.PairClaim): the
+// device, and how to sync it, so the first sync needs no hello first.
+type PairClaimResponse struct {
+	DeviceID int64       `json:"device_id"`
+	Watch    WatchConfig `json:"watch"`
+}
+
+// PairViewRequest carries the node's pairing session after each change (POST Prefix+"/pairing").
+type PairViewRequest struct {
+	View nodehub.PairView `json:"view"`
 }
 
 // LiveRequest carries a live link's readings; End, once, says why it ended.

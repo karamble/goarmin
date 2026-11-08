@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/karamble/goarmin/internal/nodehub"
+	"github.com/karamble/goarmin/internal/nodes"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/garmin/product"
 )
@@ -33,6 +35,15 @@ type Pairing interface {
 	PairSetup(ctx context.Context, id string, user int64, req nodehub.PairSetupRequest) (nodehub.PairView, error)
 	CancelPairing(id string, user int64, admin bool) error
 	RunningPairing() (nodehub.PairView, bool)
+}
+
+// pairOn is a sync role that pairs on a chosen computer: this server or one of its sync nodes
+// (nodes.Registry).
+type pairOn interface {
+	StartPairingOn(ctx context.Context, starter, owner, node int64) (nodehub.PairView, bool, error)
+	PairComputers(ctx context.Context, owner int64) []nodes.PairComputer
+	BluetoothOf(ctx context.Context, node int64) (nodehub.Bluetooth, error)
+	PowerOnOf(ctx context.Context, node int64) error
 }
 
 // pairer returns the sync role's pairing, or answers 503.
@@ -64,6 +75,13 @@ func (s *Server) pairError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "Someone is adding a watch right now. Try again in a few minutes.")
 	case errors.Is(err, nodehub.ErrStopping):
 		writeError(w, http.StatusServiceUnavailable, "the server is stopping")
+	case errors.Is(err, nodes.ErrNoPairing):
+		writeError(w, http.StatusConflict, "No computer here can pair a watch for this account now: the sync node "+
+			"near the watch must be running and signed in.")
+	case errors.Is(err, nodehub.ErrCannotPair):
+		writeError(w, http.StatusServiceUnavailable, "that computer cannot add watches")
+	case errors.Is(err, nodes.ErrOffline), errors.Is(err, nodes.ErrNoAnswer):
+		writeError(w, http.StatusServiceUnavailable, "The computer that pairs does not answer: "+err.Error())
 	default:
 		s.internalError(w, r, err)
 	}
@@ -133,8 +151,16 @@ func (s *Server) pairingJSON(ctx context.Context, v nodehub.PairView) map[string
 	if v.DeviceID != 0 {
 		out["device_id"] = v.DeviceID
 	}
+	out["node"] = nil
+	if v.NodeID != 0 {
+		out["node"] = map[string]any{"id": v.NodeID, "name": v.Node}
+	}
 	if !v.Terminal() {
-		if b, err := s.opt.Node.Bluetooth(ctx); err == nil {
+		bt := s.opt.Node.Bluetooth
+		if po, ok := s.opt.Node.(pairOn); ok {
+			bt = func(ctx context.Context) (nodehub.Bluetooth, error) { return po.BluetoothOf(ctx, v.NodeID) }
+		}
+		if b, err := bt(ctx); err == nil {
 			state := b.PowerState
 			if state == "" {
 				state = map[bool]string{true: "on", false: "off"}[b.Powered]
@@ -149,7 +175,8 @@ func (s *Server) pairingJSON(ctx context.Context, v nodehub.PairView) map[string
 }
 
 // startPairing opens the server's pairing session. {"owner": id} lets an admin add a watch for
-// another account; the body is optional.
+// another account, {"node": id} pairs on that sync node (0 or none: goarmin chooses, see
+// /api/pairing/computers); the body is optional.
 func (s *Server) startPairing(w http.ResponseWriter, r *http.Request, u store.User) {
 	p, ok := s.pairer(w)
 	if !ok {
@@ -157,6 +184,7 @@ func (s *Server) startPairing(w http.ResponseWriter, r *http.Request, u store.Us
 	}
 	var req struct {
 		Owner int64 `json:"owner"`
+		Node  int64 `json:"node"`
 	}
 	if r.ContentLength != 0 && !decode(w, r, &req) {
 		return
@@ -173,7 +201,19 @@ func (s *Server) startPairing(w http.ResponseWriter, r *http.Request, u store.Us
 		}
 		owner = req.Owner
 	}
-	v, created, err := p.StartPairing(u.ID, owner)
+	var (
+		v       nodehub.PairView
+		created bool
+		err     error
+	)
+	switch po, on := p.(pairOn); {
+	case on:
+		v, created, err = po.StartPairingOn(r.Context(), u.ID, owner, req.Node)
+	case req.Node != 0:
+		err = nodes.ErrNoPairing
+	default:
+		v, created, err = p.StartPairing(u.ID, owner)
+	}
 	if err != nil {
 		s.pairError(w, r, err)
 		return
@@ -183,6 +223,55 @@ func (s *Server) startPairing(w http.ResponseWriter, r *http.Request, u store.Us
 		status = http.StatusCreated
 	}
 	writeJSON(w, status, s.pairingJSON(r.Context(), v))
+}
+
+// computerJSON is a computer that can pair, with its Bluetooth.
+func computerJSON(c nodes.PairComputer) map[string]any {
+	m := map[string]any{"node": c.Node, "name": c.Name, "here": c.Node == 0, "adapter": nil}
+	if b := c.Adapter; b != nil {
+		state := b.PowerState
+		if state == "" {
+			state = map[bool]string{true: "on", false: "off"}[b.Powered]
+		}
+		a := map[string]any{"name": b.Name, "powered": b.Powered, "power_state": state, "busy": nil}
+		if b.Busy != nil {
+			a["busy"] = map[string]any{"kind": b.Busy.Kind, "since": b.Busy.Since.Unix()}
+		}
+		m["adapter"] = a
+	}
+	return m
+}
+
+// pairComputers lists the computers that can pair a watch for ?owner (default: the user; another
+// account for admins only): this server ("here") and the online sync nodes that may sync that
+// account's watches.
+func (s *Server) pairComputers(w http.ResponseWriter, r *http.Request, u store.User) {
+	owner := u.ID
+	if q := r.URL.Query().Get("owner"); q != "" {
+		id, err := strconv.ParseInt(q, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "owner is an account id")
+			return
+		}
+		if id != u.ID && !u.IsAdmin {
+			writeError(w, http.StatusForbidden, "only admins add watches for someone else")
+			return
+		}
+		owner = id
+	}
+	out := []map[string]any{}
+	if po, ok := s.opt.Node.(pairOn); ok && s.node() != nil {
+		for _, c := range po.PairComputers(r.Context(), owner) {
+			out = append(out, computerJSON(c))
+		}
+	} else if p, ok := s.opt.Node.(Pairing); ok && p != nil && s.node() != nil {
+		c := nodes.PairComputer{}
+		if b, err := s.opt.Node.Bluetooth(r.Context()); err == nil {
+			c.Adapter = &b
+		}
+		out = append(out, computerJSON(c))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // myPairing returns the user's session (running, or ended a little while ago), so a reload

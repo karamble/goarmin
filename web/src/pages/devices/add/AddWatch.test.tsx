@@ -5,7 +5,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Device, PairView, PairWatch } from '../../../api/types'
+import type { Device, PairComputer, PairView, PairWatch } from '../../../api/types'
 import { HeaderSlotContext } from '../../../app/section/HeaderSlot'
 import { fixtureMe, renderWith, where } from '../../../test/fixtures'
 import { ToastProvider } from '../../../ui/Toast'
@@ -25,7 +25,7 @@ function view(over: Partial<PairView> = {}): PairView {
   return {
     id: 's1', state: 'prepare', started_at: now - 10, expires_at: now + 590, owner: { id: 1, email: 'a@example.invalid', name: 'Ada' },
     error: null, error_code: null, retry: false, discovering: false, watches: [], selected: null, prompt: null, steps: [],
-    identified: null, ownership: null, former_owner: false, bond: null, device_id: null,
+    identified: null, ownership: null, former_owner: false, bond: null, device_id: null, node: null,
     adapter: { name: 'hci0', powered: true, power_state: 'on', pairable: true }, busy: null, ...over,
   }
 }
@@ -45,12 +45,17 @@ function device(over: Partial<Device> = {}): Device {
 
 type Handler = (body: unknown) => { status?: number; json?: unknown } | undefined
 
+const btOn = { name: 'hci0', powered: true, power_state: 'on', busy: null }
+const here: PairComputer = { node: 0, name: '', here: true, adapter: btOn }
+const omarchy: PairComputer = { node: 3, name: 'omarchy', here: false, adapter: btOn }
+const kitchen: PairComputer = { node: 4, name: 'pi-kitchen', here: false, adapter: { ...btOn, powered: false, power_state: 'off' } }
+
 /**
  * server fakes the API: the session (with an event stream the test pushes views into), the
  * actions (recorded; each answers with the view handlers[path] gives, else the current one),
  * Bluetooth, devices, accounts.
  */
-function server(opt: { session?: PairView | null; bluetooth?: object; devices?: Device[]; handlers?: Record<string, Handler> } = {}) {
+function server(opt: { session?: PairView | null; bluetooth?: object; devices?: Device[]; handlers?: Record<string, Handler>; computers?: PairComputer[] } = {}) {
   const s = {
     session: opt.session ?? null,
     devices: opt.devices ?? [],
@@ -70,7 +75,8 @@ function server(opt: { session?: PairView | null; bluetooth?: object; devices?: 
   }
   const reply = (v: unknown, status = 200) => new Response(v === undefined ? null : JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } })
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    const path = new URL(url, 'http://localhost').pathname
+    const u = new URL(url, 'http://localhost')
+    const path = u.pathname
     const method = init?.method ?? 'GET'
     if (method !== 'GET') {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
@@ -95,7 +101,10 @@ function server(opt: { session?: PairView | null; bluetooth?: object; devices?: 
       return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
     }
     if (path === '/api/pairing/s1') return reply(s.session)
+    if (path === '/api/pairing/computers') return reply(opt.computers ?? [here])
     if (path === '/api/bluetooth') {
+      const c = (opt.computers ?? []).find((c) => String(c.node) === u.searchParams.get('node'))
+      if (c && c.adapter?.power_state !== 'on') return reply({ available: true, adapter: 'hci0', powered: false, power_state: 'off', busy: null })
       return reply(opt.bluetooth ?? { available: true, adapter: 'hci0', address: 'AA:BB:CC:00:11:22', powered: true, power_state: 'on', busy: null })
     }
     if (path === '/api/devices') return reply(s.devices)
@@ -307,6 +316,55 @@ describe('Add a watch', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(where.path).toBe('/devices/watches'))
     expect(s.writes.at(-1)).toEqual({ method: 'DELETE', path: '/api/pairing/s1', body: undefined })
+  })
+
+  it('pairs through the sync node the server offers, with no choice to make', async () => {
+    const s = server({ computers: [omarchy], handlers: { 'POST /api/pairing': () => ({ status: 201, json: view({ node: { id: 3, name: 'omarchy' } }) }) } })
+    show()
+    await screen.findByRole('heading', { name: 'Get the watch ready' })
+    await screen.findByText('Bluetooth on omarchy is on')
+    expect(screen.queryByRole('group', { name: 'Pair with' })).toBeNull()
+    expect(screen.getAllByText('omarchy').length).toBeGreaterThan(0) // "goarmin pairs the watch with omarchy"
+    const go = screen.getByRole('button', { name: 'My watch shows a pairing screen' })
+    await waitFor(() => expect((go as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(go)
+    await waitFor(() => expect(s.writes.length).toBeGreaterThan(0))
+    expect(s.writes[0]).toEqual({ method: 'POST', path: '/api/pairing', body: { node: 3 } })
+  })
+
+  it('asks which computer pairs when there are several', async () => {
+    const s = server({ computers: [here, omarchy, kitchen] })
+    show()
+    const group = await screen.findByRole('group', { name: 'Pair with' })
+    const radios = within(group).getAllByRole('radio') as HTMLInputElement[]
+    expect(radios).toHaveLength(3)
+    expect(radios[0].checked).toBe(true) // this server first
+    expect(within(group).getByText('Bluetooth is off')).toBeTruthy()
+    fireEvent.click(within(group).getByLabelText(/pi-kitchen/))
+    const go = screen.getByRole('button', { name: 'My watch shows a pairing screen' }) as HTMLButtonElement
+    await screen.findByText('Bluetooth on pi-kitchen is off')
+    expect(go.disabled).toBe(true)
+    fireEvent.click(within(group).getByLabelText(/omarchy/))
+    await waitFor(() => expect(go.disabled).toBe(false))
+    fireEvent.click(go)
+    await waitFor(() => expect(s.writes.length).toBeGreaterThan(0))
+    expect(s.writes[0].body).toEqual({ node: 3 })
+  })
+
+  it('says when no computer can pair', async () => {
+    server({ computers: [] })
+    show()
+    await screen.findByText(/No computer can pair a watch right now/)
+    expect((screen.getByRole('button', { name: 'My watch shows a pairing screen' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('names the sync node that pairs in the list and the setup', async () => {
+    const s = server({ session: view({ state: 'finding', node: { id: 3, name: 'omarchy' }, watches: [{ ...fenix, paired_here: true, owner: 'yours' }] }) })
+    show()
+    await screen.findByRole('heading', { name: 'Choose your watch' })
+    expect(screen.getByText('Already yours · paired with omarchy')).toBeTruthy()
+    s.push(view({ state: 'setup', node: { id: 3, name: 'omarchy' }, identified, ownership: 'yours', bond: 'existing' }))
+    await screen.findByText(/Uses the pairing omarchy already had/)
   })
 
   it('lets an admin add a watch for someone else', async () => {
