@@ -475,3 +475,36 @@ func TestRemovingAWatch(t *testing.T) {
 	admin.want(409, "POST", "/api/admin/devices/"+id+"/release", nil)
 	admin.want(204, "POST", "/api/admin/devices/"+id+"/forget", nil)
 }
+
+// TestScaleIsNoWatch: a scale is listed as a scale, takes a nickname, and answers 409 to what
+// only a watch does.
+func TestScaleIsNoWatch(t *testing.T) {
+	node := &stubNode{}
+	e := newEnvWith(t, node)
+	admin := e.admin()
+	ctx := context.Background()
+	u, _ := e.st.UserByEmail(ctx, "admin@example.invalid")
+	scale, err := e.st.EnsureDevice(ctx, store.Device{UnitID: 4242, Product: 3461}) // Index Smart Scale 2
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.AssignIfUnowned(ctx, scale.ID, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprint(scale.ID)
+	list := decodeJSON[[]map[string]any](t, admin.want(200, "GET", "/api/devices", nil))
+	if len(list) != 1 || list[0]["kind"] != "scale" || list[0]["model"] != "Index Smart Scale 2" {
+		t.Fatalf("devices %v", list)
+	}
+	admin.want(200, "PATCH", "/api/devices/"+id, map[string]string{"nickname": "Bathroom"})
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/sync"}, {"GET", "/live"}, {"GET", "/files"}, {"POST", "/unpair"},
+	} {
+		admin.want(409, c.method, "/api/devices/"+id+c.path, nil)
+	}
+	admin.want(409, "PATCH", "/api/devices/"+id, map[string]string{"after_fetch": "archive"})
+	admin.want(409, "POST", "/api/devices/"+id+"/release", map[string]bool{"unpair": true})
+	if len(node.synced) != 0 {
+		t.Fatal("a scale was synced")
+	}
+}

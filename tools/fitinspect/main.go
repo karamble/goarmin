@@ -27,6 +27,8 @@ import (
 	"github.com/muktihari/fit/decoder"
 	"github.com/muktihari/fit/profile/mesgdef"
 	"github.com/muktihari/fit/profile/typedef"
+
+	"github.com/karamble/goarmin/pkg/fitprofile"
 	"github.com/muktihari/fit/proto"
 )
 
@@ -209,7 +211,7 @@ func (r *report) print() {
 		fmt.Printf("  %-28s %5d files  %s\n", name, a.files, strings.Join(parts, ", "))
 	}
 
-	fmt.Println("\n== Messages (number, name, count, files, folders)")
+	fmt.Println("\n== Messages (number, name, count, files, folders; * = named by the community profile)")
 	nums := make([]typedef.MesgNum, 0, len(r.mesgs))
 	for n := range r.mesgs {
 		nums = append(nums, n)
@@ -217,9 +219,14 @@ func (r *report) print() {
 	sort.Slice(nums, func(i, j int) bool { return nums[i] < nums[j] })
 	for _, n := range nums {
 		s := r.mesgs[n]
+		// Garmin's own name, else the community profile's (marked *), else none.
 		name := n.String()
+		pm, inProfile := fitprofile.Lookup(uint16(n))
 		if strings.HasPrefix(name, "MesgNumInvalid(") {
 			name = "UNDOCUMENTED"
+			if inProfile {
+				name = pm.Name + " *"
+			}
 		}
 		fmt.Printf("\n  %5d %-28s count=%-8d files=%-5d folders=%s\n",
 			uint16(n), name, s.count, len(s.files), strings.Join(sortedKeys(s.folders), ","))
@@ -249,6 +256,21 @@ func (r *report) print() {
 			rng := ""
 			if fs.numeric {
 				rng = fmt.Sprintf(" min=%g max=%g", fs.min, fs.max)
+			}
+			if f, ok := pm.Field(byte(fn)); ok && inProfile {
+				// Raw values; the community profile's scale and units say what they mean.
+				meaning := f.Type
+				if f.Units != "" {
+					meaning += " " + f.Units
+				}
+				if f.Scale != 0 && f.Scale != 1 {
+					meaning += fmt.Sprintf(" /%g", f.Scale)
+				}
+				if f.Offset != 0 {
+					meaning += fmt.Sprintf(" -%g", f.Offset)
+				}
+				fmt.Printf("        community field %3d %s (%s): count=%d%s sample=%s\n", fn, f.Name, meaning, fs.count, rng, fs.sample)
+				continue
 			}
 			fmt.Printf("        undocumented field %3d: count=%d%s sample=%s\n", fn, fs.count, rng, fs.sample)
 		}

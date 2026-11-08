@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -61,6 +62,26 @@ func lockBluetooth(name, dataDir string, stderr io.Writer) (func(), bool) {
 	return unlock, true
 }
 
+// cpuProfile writes a CPU profile of the command to path (none if path is ""); the returned
+// function stops it.
+func cpuProfile(path string, stderr io.Writer) func() {
+	if path == "" {
+		return func() {}
+	}
+	f, err := os.Create(path)
+	if err == nil {
+		err = pprof.StartCPUProfile(f)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "goarmin: cpu profile:", err)
+		return func() {}
+	}
+	return func() {
+		pprof.StopCPUProfile()
+		f.Close()
+	}
+}
+
 func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
@@ -72,6 +93,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	user := fs.String("user", config.String("GOARMIN_USER", ""), "email of the account the files belong to (created if new)")
 	source := fs.String("source", "usb", "where the files come from: usb, ble (a sync spool), upload, gc_export")
 	fromUSB := fs.Bool("usb", false, "import the Garmin watch plugged in by USB (read-only: nothing on it changes)")
+	profile := fs.String("cpuprofile", "", "write a CPU profile to this file (for go tool pprof)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: goarmin import -user EMAIL [-source usb|ble|upload|gc_export] PATH...\n       goarmin import -user EMAIL -usb\n\nStores every FIT file under the paths (walked) once, by content, and extracts its health\ndata. Importing the same files again changes nothing. PATH can be a USB copy of the watch's\nGARMIN folder, a zip of one, the Garmin Connect export zip (its other files are kept for\nlater), or a sync spool (~/.local/share/goarmin/watches/<unit>/files, -source ble). -usb reads\nthe watch plugged in by USB.")
 		fs.PrintDefaults()
@@ -89,6 +111,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "goarmin import: unknown source %q\n", *source)
 		return 2
 	}
+	defer cpuProfile(*profile, stderr)()
 	ctx, stop := signalContext()
 	defer stop()
 	in, closeData, err := openData(ctx, *dataDir, slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
@@ -136,9 +159,11 @@ func runReingest(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dataDir := fs.String("data", config.DataDir(), "data directory")
 	all := fs.Bool("all", false, "ingest every file again, not only those an older extraction version read")
+	profile := fs.String("cpuprofile", "", "write a CPU profile to this file (for go tool pprof)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	defer cpuProfile(*profile, stderr)()
 	ctx, stop := signalContext()
 	defer stop()
 	in, closeData, err := openData(ctx, *dataDir, slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
@@ -148,9 +173,11 @@ func runReingest(args []string, stdout, stderr io.Writer) int {
 	}
 	defer closeData()
 	if *all {
-		if err := in.Store.ResetIngest(ctx, ingest.Handler); err != nil {
-			fmt.Fprintln(stderr, "goarmin reingest:", err)
-			return 1
+		for _, h := range []string{ingest.Handler, ingest.ExportHandler} {
+			if err := in.Store.ResetIngest(ctx, h); err != nil {
+				fmt.Fprintln(stderr, "goarmin reingest:", err)
+				return 1
+			}
 		}
 	}
 	start := time.Now()

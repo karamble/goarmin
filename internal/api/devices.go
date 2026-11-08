@@ -81,10 +81,18 @@ func toSyncStatusJSON(st nodehub.Status) syncStatusJSON {
 		AwaySince: unix(st.AwaySince), Phase: st.Phase, Listed: st.Listed, Done: st.Done, Total: st.Total}
 }
 
-// deviceJSON is a watch as d's user sees it: the sync status only while it is theirs.
+// kindOf is d's kind for the API: a device not classified yet counts as a watch.
+func kindOf(d store.Device) product.Kind {
+	if d.Kind == "" {
+		return product.Watch
+	}
+	return d.Kind
+}
+
+// deviceJSON is a device as d's user sees it: a watch's sync status only while it is theirs.
 func (s *Server) deviceJSON(d store.Device) map[string]any {
 	m := map[string]any{"id": d.ID, "unit_id": d.UnitID, "product": d.Product, "model": product.Name(d.Product),
-		"name": d.Name, "nickname": d.Nickname, "firmware": d.Firmware, "address": d.Address, "after_fetch": d.AfterFetch,
+		"name": d.Name, "nickname": d.Nickname, "kind": kindOf(d), "firmware": d.Firmware, "address": d.Address, "after_fetch": d.AfterFetch,
 		"paused": d.Paused, "delete_support": d.DeleteSupport, "usb_auto": d.USBAuto, "battery": nil, "battery_at": unix(d.BatteryAt),
 		"current": d.Current, "owned_from": d.OwnedFrom, "owned_to": nil}
 	if d.Battery >= 0 {
@@ -162,6 +170,9 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, u store.Us
 	if !decode(w, r, &req) {
 		return
 	}
+	if (req.AfterFetch != nil || req.Paused != nil || req.USBAuto != nil) && notWatch(w, d) {
+		return
+	}
 	if req.Nickname != nil {
 		n := strings.TrimSpace(*req.Nickname)
 		if utf8.RuneCountInString(n) > 60 || strings.ContainsAny(n, "\x00\r\n") {
@@ -198,6 +209,16 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, u store.Us
 	writeJSON(w, http.StatusOK, s.deviceJSON(d))
 }
 
+// notWatch answers routes only a watch has (syncs, live values, files on it, pairing, USB)
+// for another sort of device, a scale.
+func notWatch(w http.ResponseWriter, d store.Device) bool {
+	if d.Kind == product.Watch || d.Kind == "" {
+		return false
+	}
+	writeError(w, http.StatusConflict, "this device is a "+d.Kind.Words()+", not a watch")
+	return true
+}
+
 // noNode answers routes that need the sync role on a server without it.
 func (s *Server) noNode(w http.ResponseWriter, d store.Device) bool {
 	if s.opt.Node == nil || d.Address == "" {
@@ -211,7 +232,7 @@ func (s *Server) noNode(w http.ResponseWriter, d store.Device) bool {
 // already synced (older activities still on the watch). The body is optional.
 func (s *Server) syncDevice(w http.ResponseWriter, r *http.Request, u store.User) {
 	d, ok := s.ownedDevice(w, r, u)
-	if !ok {
+	if !ok || notWatch(w, d) {
 		return
 	}
 	var req struct {
@@ -268,12 +289,14 @@ type watchFileJSON struct {
 	State     string `json:"state"`
 	OnWatch   bool   `json:"on_watch"`
 	Deletable bool   `json:"deletable"`
+	// FileID is the stored file's id (for the inspector), 0 if goarmin has no copy.
+	FileID int64 `json:"file_id,omitempty"`
 }
 
 // watchFiles lists what goarmin fetched from the watch that is the user's, newest first.
 func (s *Server) watchFiles(w http.ResponseWriter, r *http.Request, u store.User) {
 	d, ok := s.userDevice(w, r, u)
-	if !ok {
+	if !ok || notWatch(w, d) {
 		return
 	}
 	out := []watchFileJSON{}
@@ -302,7 +325,7 @@ func (s *Server) watchFiles(w http.ResponseWriter, r *http.Request, u store.User
 		if !isFIT {
 			fit = -1
 		}
-		j := watchFileJSON{UID: uid, Type: f.TypeName, FITType: fit, Size: rf.Size, Recorded: rf.TimeCreated}
+		j := watchFileJSON{UID: uid, Type: f.TypeName, FITType: fit, Size: rf.Size, Recorded: rf.TimeCreated, FileID: rf.ID}
 		if !f.At.IsZero() {
 			j.Fetched = f.At.Unix()
 		}
@@ -335,7 +358,7 @@ func (s *Server) watchFiles(w http.ResponseWriter, r *http.Request, u store.User
 // connection, which starts now.
 func (s *Server) deleteWatchFiles(w http.ResponseWriter, r *http.Request, u store.User) {
 	d, ok := s.ownedDevice(w, r, u)
-	if !ok {
+	if !ok || notWatch(w, d) {
 		return
 	}
 	var req struct {
@@ -486,7 +509,7 @@ func (s *Server) syncRuns(w http.ResponseWriter, r *http.Request, u store.User) 
 // watch is 409 with what holds Bluetooth.
 func (s *Server) live(w http.ResponseWriter, r *http.Request, u store.User) {
 	d, ok := s.ownedDevice(w, r, u)
-	if !ok {
+	if !ok || notWatch(w, d) {
 		return
 	}
 	if s.opt.Node == nil || d.Address == "" {
@@ -596,7 +619,7 @@ func (s *Server) exclusive(r *http.Request, kind string, fn func() error) error 
 // all its data; adding it again (Add a watch) pairs it anew.
 func (s *Server) unpairDevice(w http.ResponseWriter, r *http.Request, u store.User) {
 	d, ok := s.ownedDevice(w, r, u)
-	if !ok {
+	if !ok || notWatch(w, d) {
 		return
 	}
 	if s.noNode(w, d) {
@@ -621,6 +644,9 @@ func (s *Server) releaseDevice(w http.ResponseWriter, r *http.Request, u store.U
 		Unpair bool `json:"unpair"`
 	}
 	if r.ContentLength != 0 && !decode(w, r, &req) {
+		return
+	}
+	if req.Unpair && notWatch(w, d) {
 		return
 	}
 	if err := s.release(r, d, u.ID, req.Unpair); err != nil {
@@ -750,7 +776,7 @@ func (s *Server) adminDevices(w http.ResponseWriter, r *http.Request, _ store.Us
 	}
 	out := []map[string]any{}
 	for _, x := range list {
-		m := map[string]any{"id": x.ID, "unit_id": x.UnitID, "model": product.Name(x.Product), "name": x.Name,
+		m := map[string]any{"id": x.ID, "unit_id": x.UnitID, "model": product.Name(x.Product), "kind": kindOf(x.Device), "name": x.Name,
 			"address": x.Address, "owner": nil, "paired": false}
 		if x.OwnerID != 0 {
 			m["owner"] = map[string]any{"id": x.OwnerID, "email": x.OwnerEmail, "name": x.OwnerName}

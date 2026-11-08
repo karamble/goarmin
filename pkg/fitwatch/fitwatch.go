@@ -4,7 +4,8 @@
 
 // Package fitwatch reads what a Garmin watch keeps about its wearer and their plans from its
 // FIT files: settings (type 2), sport profiles (3), workouts (5), courses (6), lifetime totals
-// (10) and goals (11). Values are in SI units; unknown numbers are 0 (or -1 where 0 is a real
+// (10) and goals (11); its device file (1), personal records (29), multisport settings (33),
+// golf clubs (37), settings change log (41), solar charge (58) and gear (87). Values are in SI units; unknown numbers are 0 (or -1 where 0 is a real
 // value), unknown words "".
 package fitwatch
 
@@ -34,6 +35,13 @@ type File struct {
 	Totals   []Totals
 	Workout  *Workout
 	Course   *Course
+	Gear     []GearItem
+	Clubs    []Club
+	Records  []Record
+	Changes  []Change
+	Solar    []Solar
+	// Doc keeps a settings, device or multisport file's messages that no table reads.
+	Doc Doc
 }
 
 // Zones are heart-rate and power zones with what they derive from.
@@ -188,13 +196,22 @@ type Course struct {
 	Points    []CoursePoint     `json:"points"`
 }
 
-// ErrNotWatchFile is returned for a file of another type.
-var ErrNotWatchFile = errors.New("fitwatch: not a settings, sport, workout, course, totals or goals file")
+// ErrNotWatchFile is returned for a file of a type this package does not read (Types).
+var ErrNotWatchFile = errors.New("fitwatch: not a file of the watch's own")
 
 // Types are the file types Decode reads.
-var Types = []typedef.File{typedef.FileSettings, typedef.FileSport, typedef.FileWorkout, typedef.FileCourse, typedef.FileTotals, typedef.FileGoals}
+var Types = []typedef.File{typedef.FileDevice, typedef.FileSettings, typedef.FileSport, typedef.FileWorkout, typedef.FileCourse, typedef.FileTotals,
+	typedef.FileGoals, FileRecords, FileMultisport, FileClubs, FileChangelog, FileDeviceData, FileGear}
 
-// Decode reads a settings, sport, workout, course, totals or goals file.
+// docTypes keep their other messages as a document.
+var docTypes = map[typedef.File]bool{typedef.FileDevice: true, typedef.FileSettings: true, FileMultisport: true}
+
+// readHere are the messages Decode reads into its own types; a document leaves them out.
+var readHere = map[typedef.MesgNum]bool{typedef.MesgNumFileId: true, typedef.MesgNumFileCreator: true, typedef.MesgNumDeviceSettings: true,
+	typedef.MesgNumUserProfile: true, typedef.MesgNumBikeProfile: true, typedef.MesgNumZonesTarget: true, typedef.MesgNumHrZone: true,
+	typedef.MesgNumPowerZone: true, typedef.MesgNumSport: true}
+
+// Decode reads a file of one of the Types.
 func Decode(b []byte) (*File, error) {
 	f := &File{}
 	var (
@@ -264,6 +281,8 @@ func Decode(b []byte) (*File, error) {
 				laps = append(laps, mesgdef.NewLap(m))
 			case typedef.MesgNumRecord:
 				track.Add(mesgdef.NewRecord(m))
+			default:
+				f.read(m, docTypes[f.Type], readHere)
 			}
 		}
 	}
@@ -284,7 +303,9 @@ func Decode(b []byte) (*File, error) {
 		f.Workout = workoutOf(workout, steps, titles)
 	case typedef.FileCourse:
 		f.Course = courseOf(course, track, laps, cpoints)
-	case typedef.FileTotals, typedef.FileGoals:
+	case FileDeviceData:
+		SortSolar(f.Solar)
+	case typedef.FileTotals, typedef.FileGoals, typedef.FileDevice, FileRecords, FileMultisport, FileClubs, FileChangelog, FileGear:
 	default:
 		return f, ErrNotWatchFile
 	}

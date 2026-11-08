@@ -76,13 +76,15 @@ func baseType(v proto.Value) basetype.BaseType {
 		return basetype.Uint32
 	case proto.TypeString:
 		return basetype.String
+	case proto.TypeFloat32, proto.TypeSliceFloat32:
+		return basetype.Float32
 	}
 	panic("fittest: unsupported value type " + v.Type().String())
 }
 
 func isSlice(v proto.Value) bool {
 	switch v.Type() {
-	case proto.TypeSliceUint8, proto.TypeSliceUint16, proto.TypeSliceUint32:
+	case proto.TypeSliceUint8, proto.TypeSliceUint16, proto.TypeSliceUint32, proto.TypeSliceFloat32:
 		return true
 	}
 	return false

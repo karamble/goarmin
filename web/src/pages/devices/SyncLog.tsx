@@ -8,7 +8,7 @@ import { useMe } from '../../api/hooks/auth'
 import { useDevices } from '../../api/hooks/data'
 import { useSyncLog } from '../../api/hooks/devices'
 import type { LogRun } from '../../api/types'
-import { watchName } from '../../lib/devices'
+import { isWatch, watchName } from '../../lib/devices'
 import { timeOfDay } from '../../lib/format'
 import { addDays, shortDay, today } from '../../lib/period'
 import { Skeleton, Spinner } from '../../ui/kit'
@@ -21,7 +21,7 @@ export default function SyncLog() {
   const [q, setQ] = useSearchParams()
   const watch = Number(q.get('watch')) || 0
   const problems = q.get('problems') === '1'
-  const devices = useDevices().data ?? []
+  const devices = (useDevices().data ?? []).filter(isWatch)
   const names = new Map(devices.map((d) => [d.id, watchName(d)]))
   const log = useSyncLog(watch, problems, 50)
   const strip = useSyncLog(watch, false, 200)

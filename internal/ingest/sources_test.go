@@ -72,11 +72,13 @@ func TestImportZipAndExport(t *testing.T) {
 		"DI_CONNECT/DI-Connect-Wellness/a_sleepData.json":                 []byte(`[{"calendarDate":"x"}]`),
 		"DI_CONNECT/DI-Connect-Uploaded-Files/UploadedFiles_0-_Part1.zip": part,
 		"DI_CONNECT/DI-Connect-Uploaded-Files/broken.zip":                 []byte("not a zip"),
-		"README.txt": []byte("read me"),
+		"INREACH/inreach_messages.csv":                                    []byte("a,b"),
+		"README.txt":                                                      []byte("read me"),
 	}))
-	want := map[string]int{"DI-Connect-Fitness": 1, "DI-Connect-Wellness": 1}
+	// The archive is an export as a whole: its files outside DI_CONNECT are kept too.
+	want := map[string]int{"DI-Connect-Fitness": 1, "DI-Connect-Wellness": 1, "INREACH": 1, "Top level": 1}
 	rep, err = in.Import(ctx, u, store.SourceUpload, []string{export})
-	if err != nil || !rep.Export || rep.Seen != 2 || rep.New != 1 || rep.Known != 1 || rep.Kept != 2 || rep.Other != 1 ||
+	if err != nil || !rep.Export || rep.Seen != 2 || rep.New != 1 || rep.Known != 1 || rep.Kept != 4 || rep.Other != 0 || rep.Read != 7 || rep.Current != "" ||
 		rep.Failed != 1 || rep.Archives != 2 || !reflect.DeepEqual(rep.KeptBy, want) {
 		t.Fatalf("export: %+v, %v", rep, err)
 	}
@@ -183,8 +185,10 @@ func TestExportPaths(t *testing.T) {
 		"DI_CONNECT/DI-Connect-User/user_profile.json":    "DI-Connect-User",
 		"DI_CONNECT/Other/x.json":                         "Other",
 		"DI_CONNECT/x.json":                               "DI_CONNECT",
+		"export.zip/INREACH/billing.json":                 "INREACH",
+		"export.zip/README.txt":                           "Top level",
 	} {
-		if !IsExportPath(p) || ExportFolder(p) != folder {
+		if ExportFolder(p) != folder || (!IsExportPath(p) && !strings.HasPrefix(p, "export.zip/")) {
 			t.Errorf("%s: export %v, folder %q", p, IsExportPath(p), ExportFolder(p))
 		}
 	}

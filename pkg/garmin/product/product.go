@@ -3,7 +3,8 @@
 // license that can be found in the LICENSE file.
 
 // Package product names Garmin products for people: 4536 is "Fenix 8", 4315 "Forerunner 965".
-// The names come from the FIT profile's product table, tidied up.
+// The names come from the FIT profile's product table, tidied up, and for a product the
+// official table lacks, from the community's device list (pkg/fitprofile).
 package product
 
 import (
@@ -12,17 +13,25 @@ import (
 	"unicode"
 
 	"github.com/muktihari/fit/profile/typedef"
+
+	"github.com/karamble/goarmin/pkg/fitprofile"
 )
+
+// garmin is Garmin's manufacturer number.
+const garmin = 1
 
 // regional variants carry the same model name.
 var regions = []string{"_japan", "_korea", "_taiwan", "_china", "_asia", "_apac", "_sea", "_india", "_chinese", "_jpn", "_kor", "_twn"}
 
 var words = map[string]string{"fr": "Forerunner", "gen": "Gen", "xt": "XT", "hrm": "HRM", "gps": "GPS"}
 
-// Name is a product number as its model name, or "Garmin <number>" for one the table lacks.
+// Name is a product number as its model name, or "Garmin <number>" for one neither table has.
 func Name(product uint16) string {
 	raw := typedef.GarminProduct(product).String()
 	if raw == "" || strings.ContainsAny(raw, "() ") || strings.HasPrefix(raw, "GarminProduct") {
+		if n := fitprofile.DeviceName(garmin, product); n != "" {
+			return n
+		}
 		return "Garmin " + strconv.Itoa(int(product))
 	}
 	for _, r := range regions {

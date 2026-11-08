@@ -10,7 +10,7 @@ import { useLogout, useMe } from '../../api/hooks/auth'
 import { useDevices, useRecentActivities } from '../../api/hooks/data'
 import { useSyncNow } from '../../api/hooks/devices'
 import { useCourses, useWorkouts } from '../../api/hooks/training'
-import { watchName } from '../../lib/devices'
+import { deviceName, isWatch, watchName } from '../../lib/devices'
 import { fuzzyFilter } from '../../lib/fuzzy'
 import { parseDay, shortDay, today as todayIn } from '../../lib/period'
 import { useRegisteredActions, type PaletteItem } from './actions'
@@ -81,8 +81,8 @@ function Palette({ sections, onClose }: { sections: SectionDef[]; onClose: () =>
     }
     for (const d of devices ?? []) {
       if (!d.current) continue
-      const name = watchName(d)
-      if (d.sync) {
+      const name = deviceName(d)
+      if (d.sync && isWatch(d)) {
         out.push({
           id: `sync-${d.id}`, label: `Sync ${name} now`, icon: RefreshCw,
           run: () => syncNow.mutate({ id: d.id }, {

@@ -58,6 +58,10 @@ goarmin.
   access to BlueZ over D-Bus; a desktop session has it, and no root is needed.
 - Go 1.27.3.
 - Node.js and npm, to build the dashboard. Tested with Node 26 and npm 11.
+- sqlite3, for backups and the inspection targets (`make list-users`, `make db-shell`, …).
+- GNU time (`/usr/bin/time`; on Arch the `time` package), for `make bench-import`.
+
+`make check-tools` checks for all of them.
 
 ## Quick start
 

@@ -3,7 +3,8 @@
 // license that can be found in the LICENSE file.
 
 import {
-  Activity, Dumbbell, Trophy, BatteryCharging, Flame, Footprints, Gauge, HeartPulse, LineChart, Map as MapIcon, Moon, Radio, Target, TrendingUp, Waves, Watch, Wind, Zap,
+  Activity, Dumbbell, Trophy, BatteryCharging, Droplet, Flame, Footprints, Gauge, HeartPulse, LineChart, Map as MapIcon, Moon, Radio, Scale, Target, Thermometer,
+  TrendingUp, Waves, Watch, Wind, Zap,
 } from 'lucide-react'
 import type { Me } from '../api/types'
 import { dailyMetrics, metricByKey } from './metrics'
@@ -54,6 +55,15 @@ export const cards: CardDef[] = [
     fields: [{ key: 'predictions', label: 'Race predictions', kind: 'toggle' }],
     parseOptions: (o) => ({ predictions: o.predictions !== false }),
     load: () => import('./cards/Vo2max') }),
+  def({ type: 'weight', title: 'Weight', description: 'Your last weigh-in and the ones before', icon: Scale,
+    category: 'health', sizes: ['S', 'M'], defaultSize: 'S', defaultOptions: {}, to: '/health/body',
+    load: () => import('./cards/Weight') }),
+  def({ type: 'skin-temp', title: 'Skin temperature', description: 'Last night against your baseline', icon: Thermometer,
+    category: 'sleep', sizes: ['S', 'M'], defaultSize: 'S', defaultOptions: {}, to: '/health/body',
+    load: () => import('./cards/SkinTemp') }),
+  def({ type: 'hydration', title: 'Hydration', description: 'What you logged drinking', icon: Droplet,
+    category: 'health', sizes: ['S', 'M'], defaultSize: 'S', defaultOptions: {}, to: '/health/body',
+    load: () => import('./cards/Hydration') }),
   def({ type: 'breathing', title: 'Breathing', description: 'Respiration and blood oxygen', icon: Wind,
     category: 'health', sizes: ['S', 'M'], defaultSize: 'S', defaultOptions: {}, to: '/health/breathing',
     load: () => import('./cards/Breathing') }),

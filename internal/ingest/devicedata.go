@@ -25,13 +25,17 @@ func (in *Ingester) DeleteDeviceData(ctx context.Context, user, device int64) (s
 		if err != nil {
 			return gone, err
 		}
+		t := newTouched()
 		for _, id := range ids {
-			if err := in.File(ctx, id); err != nil {
+			if err := in.file(ctx, id, t); err != nil {
 				in.log().Warn("ingest: re-ingesting an overlapping file after a delete", "file", id, "err", err)
 			}
 		}
-	}
-	if err := in.Store.RebuildDays(ctx, user, gone.Days); err != nil {
+		t.add(user, gone.Days)
+		if err := in.rebuild(ctx, t); err != nil {
+			return gone, err
+		}
+	} else if err := in.Store.RebuildDays(ctx, user, gone.Days); err != nil {
 		return gone, err
 	}
 	for _, sum := range gone.Blobs {

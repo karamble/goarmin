@@ -16,10 +16,17 @@ import { Meter } from '../../glance/cards/parts'
 import {
   byDay, Card, ChartCard, dayClick, Empty, Kpis, Loaded, nightsByDay, num, rangeDays, StageBar, useHealth,
 } from './parts'
+import { NapsCard } from './extras'
 
 export default function SleepPage() {
   const { p } = useHealth()
-  return p.period === 'day' ? <SleepDay /> : p.period === 'year' ? <SleepYear /> : <SleepRange />
+  if (p.period !== 'day') return p.period === 'year' ? <SleepYear /> : <SleepRange />
+  return (
+    <div className="grid gap-5">
+      <SleepDay />
+      <NapsCard day={p.day} tz={p.tz} />
+    </div>
+  )
 }
 
 function SleepDay() {

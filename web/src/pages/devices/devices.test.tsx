@@ -21,7 +21,7 @@ const me = fixtureMe({ server: { version: 'dev', sync: true, tiles: false } })
 
 function device(over: Partial<Device> = {}): Device {
   return {
-    id: 1, unit_id: 3912345678, product: 4536, model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: '', firmware: '23.40',
+    id: 1, unit_id: 3912345678, product: 4536, kind: 'watch', model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: '', firmware: '23.40',
     address: 'C0:FF:EE:12:34:56', after_fetch: 'keep', paused: false, usb_auto: true, delete_support: '', battery: 76, battery_at: now - 600,
     current: true, owned_from: 0, owned_to: null,
     sync: { address: 'C0:FF:EE:12:34:56', running: false, live: false, last_ok: false, pulled: 0, imported: 0, failures: 0,
@@ -76,7 +76,7 @@ describe('Watches', () => {
     await screen.findByRole('heading', { name: 'Fenix 8' })
     expect(screen.getByText(/Not in range since/)).toBeTruthy()
     expect(screen.getByRole('img', { name: 'Battery 76 percent' })).toBeTruthy()
-    expect(screen.getByText('Watches you had before (1)')).toBeTruthy()
+    expect(screen.getByText('Devices you had before (1)')).toBeTruthy()
     // Not in range is not trouble: no alert.
     expect(screen.queryByRole('alert')).toBeNull()
 
@@ -91,6 +91,32 @@ describe('Watches', () => {
     renderWith(<Page><Watches /></Page>, { me })
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toMatch(/3 syncs failed in a row.*no longer paired/)
+  })
+})
+
+describe('Devices', () => {
+  const scale = () => device({ id: 2, unit_id: 4242, product: 3461, kind: 'scale', model: 'Index Smart Scale 2', name: '', address: '',
+    battery: null, battery_at: undefined, sync: undefined })
+
+  it('groups devices by kind: a scale is a scale, not a watch', async () => {
+    api([device(), scale()])
+    renderWith(<Page><Watches /></Page>, { me })
+    const watches = await screen.findByRole('list', { name: 'Watches' })
+    const scales = screen.getByRole('list', { name: 'Scales' })
+    expect(within(watches).getByText('Fenix 8')).toBeTruthy()
+    expect(within(scales).getByText('Index Smart Scale 2')).toBeTruthy()
+    expect(within(scales).getByRole('img', { name: 'Scale' })).toBeTruthy()
+    expect(within(scales).getByText('From imports')).toBeTruthy()
+    expect(within(scales).queryByRole('button', { name: /Sync now/ })).toBeNull()
+  })
+
+  it('says there is no watch yet beside other devices', async () => {
+    api([scale()])
+    renderWith(<Page><Watches /></Page>, { me })
+    expect(await screen.findByText(/No watch yet/)).toBeTruthy()
+    expect(screen.getAllByRole('link', { name: 'Add a watch' })).toHaveLength(2) // the header's and the note's
+    // One group: no heading.
+    expect(screen.queryByRole('heading', { name: /Scales/ })).toBeNull()
   })
 })
 
@@ -120,6 +146,21 @@ describe('Watch', () => {
     expect(writes).toHaveLength(1)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete activities after fetching' }))
     await waitFor(() => expect(writes[1].body).toEqual({ after_fetch: 'archive_delete' }))
+  })
+
+  it('shows a scale without what only a watch has', async () => {
+    api([device({ id: 2, unit_id: 4242, product: 3461, kind: 'scale', model: 'Index Smart Scale 2', name: '', address: '', battery: null,
+      battery_at: undefined, sync: undefined })], { '/api/devices/2/summary': json({ files: 36, bytes: 9000, by_type: { 9: 36 }, activities: 0,
+      nights: 0, days: 36, first_day: '', last_day: '', first_at: 0, last_at: 0 }) })
+    at('/devices/watches/2')
+    expect(await screen.findByText('What came from this scale')).toBeTruthy()
+    expect(screen.getByText('How its data arrives')).toBeTruthy()
+    expect(screen.queryByText('Recent syncs')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Files' })).toBeNull()
+    expect(screen.queryByText('Battery')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('textbox', { name: 'What you call it' })).toBeTruthy()
+    expect(screen.queryByText('After fetching')).toBeNull()
   })
 
   it("shows what the watch keeps: its settings, goals and bikes", async () => {

@@ -5,6 +5,7 @@
 package ingest
 
 import (
+	"archive/zip"
 	"context"
 	"errors"
 	"io/fs"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/karamble/goarmin/internal/store"
+	"github.com/karamble/goarmin/pkg/garmin/gcexport"
 	"github.com/karamble/goarmin/pkg/zipwalk"
 )
 
@@ -29,6 +31,9 @@ type Entry struct {
 	// beyond the limits): the import reports it and goes on.
 	Read func() ([]byte, error)
 	Err  error
+	// InExport says the file came from an archive that is a Garmin Connect export as a whole
+	// (it holds DI_CONNECT/), even if its own path lies outside DI_CONNECT (INREACH/, …).
+	InExport bool
 }
 
 // Source hands an import its files, one at a time. fn's error ends the walk.
@@ -53,55 +58,99 @@ type ImportOptions struct {
 // ingested, for readers to come. Anything else is counted and left out.
 func (in *Ingester) ImportFrom(ctx context.Context, user store.User, src Source, opt ImportOptions) (Report, error) {
 	var rep Report
-	err := src(ctx, func(e Entry) error {
+	// The walk reads the files in order and they are decoded ahead on every core; the writer
+	// stores them one at a time, in the walk's order.
+	type job struct {
+		e      Entry
+		export bool
+		kind   int // what to do: one of the constants below
+		p      *prepared
+		b      []byte
+		exp    *gcexport.Result // an export file read ahead (nil if it could not be: expErr)
+		expErr error
+		err    error
+	}
+	const (
+		jobFIT = iota
+		jobUnchanged
+		jobKeep
+		jobOther
+		jobFailed
+	)
+	err := ordered(ctx, workers(), func(submit func(func() job) error) error {
+		return src(ctx, func(e Entry) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			j := job{e: e, export: e.InExport || IsExportPath(e.Path)}
+			now := func(kind int) error { j.kind = kind; return submit(func() job { return j }) }
+			switch {
+			case e.Err != nil:
+				j.err = e.Err
+				return now(jobFailed)
+			case strings.EqualFold(path.Ext(e.Path), ".fit"):
+				if opt.Skip != nil && opt.Skip(e) {
+					return now(jobUnchanged)
+				}
+				b, err := e.Read()
+				if err != nil {
+					j.err = err
+					return now(jobFailed)
+				}
+				return submit(func() job { j.p = prepare(b); return j })
+			case j.export:
+				b, err := e.Read()
+				if err != nil {
+					j.err = err
+					return now(jobFailed)
+				}
+				j.b, j.kind = b, jobKeep
+				return submit(func() job { j.exp, j.expErr = gcexport.Read(e.Path, b); return j })
+			}
+			return now(jobOther)
+		})
+	}, func(j job) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		export := IsExportPath(e.Path)
-		if export {
+		rep.Read++
+		rep.Current = j.e.Path
+		if j.export {
 			rep.Export = true
 		}
 		fail := func(err error) {
 			rep.Failed++
-			rep.addError(e.Path + ": " + err.Error())
+			rep.addError(j.e.Path + ": " + err.Error())
 		}
-		switch {
-		case e.Err != nil:
-			fail(e.Err)
-		case strings.EqualFold(path.Ext(e.Path), ".fit"):
+		switch j.kind {
+		case jobFailed:
+			if strings.EqualFold(path.Ext(j.e.Path), ".fit") && j.e.Err == nil {
+				rep.Seen++
+			}
+			fail(j.err)
+		case jobUnchanged:
 			rep.Seen++
-			if opt.Skip != nil && opt.Skip(e) {
-				rep.Unchanged++
-				break
-			}
-			b, err := e.Read()
-			if err != nil {
-				fail(err)
-				break
-			}
-			rep.Bytes += int64(len(b))
+			rep.Unchanged++
+		case jobFIT:
+			rep.Seen++
+			rep.Bytes += int64(len(j.p.b))
 			source := opt.Source
-			if export {
+			if j.export {
 				source = store.SourceGCExport
 			}
-			sum, err := in.importBytes(ctx, user, source, path.Base(e.Path), b, &rep)
+			sum, err := in.importPrepared(ctx, user, source, path.Base(j.e.Path), j.p, &rep)
 			if err != nil {
 				fail(err)
 			}
 			if sum != "" && opt.Stored != nil {
-				opt.Stored(e, sum)
+				opt.Stored(j.e, sum)
 			}
-		case export:
-			b, err := e.Read()
-			if err != nil {
-				fail(err)
-				break
-			}
-			rep.Bytes += int64(len(b))
-			if err := in.keep(ctx, user, e.Path, b, &rep); err != nil {
+		case jobKeep:
+			rep.Bytes += int64(len(j.b))
+			if err := in.keep(ctx, user, j.e.Path, j.b, j.exp, j.expErr, &rep); err != nil {
 				fail(err)
 			}
-		default:
+		case jobOther:
 			rep.Other++
 		}
 		if opt.Progress != nil {
@@ -109,22 +158,29 @@ func (in *Ingester) ImportFrom(ctx context.Context, user store.User, src Source,
 		}
 		return nil
 	})
-	return rep, err
+	rep.Current = ""
+	return rep, errors.Join(err, in.finish(ctx, &rep))
 }
 
-// keep stores an export's file as it is: not ingested, with its path as its name.
-func (in *Ingester) keep(ctx context.Context, user store.User, name string, b []byte, rep *Report) error {
+// keep stores an export's file as it is, with its path as its name, and writes what gcexport
+// read from it (r, or readErr).
+func (in *Ingester) keep(ctx context.Context, user store.User, name string, b []byte, r *gcexport.Result, readErr error, rep *Report) error {
 	sum, err := in.Blobs.PutBytes(b)
 	if err != nil {
 		return err
 	}
-	_, isNew, err := in.Store.AddRawFile(ctx, store.RawFile{SHA256: sum, Size: int64(len(b)), UserID: user.ID,
+	rf, isNew, err := in.Store.AddRawFile(ctx, store.RawFile{SHA256: sum, Size: int64(len(b)), UserID: user.ID,
 		Source: store.SourceGCExport, SourceName: name})
 	if err != nil {
 		return err
 	}
 	if isNew {
 		rep.Kept++
+		// Read at once: its daily values, nights, weigh-ins, … (a file it cannot read stays
+		// stored as it is, and a later version may read it).
+		if err := in.writeExport(ctx, rf, r, readErr, rep.touched()); err != nil {
+			rep.addError(name + ": " + err.Error())
+		}
 	}
 	if rep.KeptBy == nil {
 		rep.KeptBy = map[string]int{}
@@ -144,9 +200,11 @@ func IsExportPath(p string) bool {
 	return false
 }
 
-// ExportFolder is the export folder a path belongs to ("DI-Connect-Fitness"), for reports.
+// ExportFolder is the export folder a path belongs to ("DI-Connect-Fitness", or a top-level
+// folder of the export such as "INREACH"), for reports.
 func ExportFolder(p string) string {
 	parts := strings.Split(p, "/")
+	top := ""
 	for i, part := range parts {
 		if strings.HasPrefix(part, "DI-Connect-") {
 			return part
@@ -154,8 +212,33 @@ func ExportFolder(p string) string {
 		if part == "DI_CONNECT" && i+2 < len(parts) {
 			return parts[i+1]
 		}
+		if strings.EqualFold(path.Ext(part), ".zip") && top == "" && i+1 < len(parts) {
+			top = parts[i+1] // the first folder inside the export's archive
+			if i+2 == len(parts) {
+				top = "Top level" // a file at the archive's root
+			}
+		}
+	}
+	if top != "" && top != "DI_CONNECT" {
+		return top
 	}
 	return "DI_CONNECT"
+}
+
+// isExportArchive reports whether the zip archive at disk is a Garmin Connect export: one of
+// its entries lies under DI_CONNECT/. Only the central directory is read.
+func isExportArchive(disk string) bool {
+	r, err := zip.OpenReader(disk)
+	if err != nil {
+		return false
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		if strings.HasPrefix(f.Name, "DI_CONNECT/") || strings.Contains(f.Name, "/DI_CONNECT/") {
+			return true
+		}
+	}
+	return false
 }
 
 // Paths is a Source over files and folders on disk. A folder's files are named from the
@@ -235,11 +318,12 @@ func diskEntry(ctx context.Context, disk, name string, zw *zipwalk.Walker, fn fu
 			}
 		}
 		defer func() { zw.Skipped = nil }()
+		export := isExportArchive(disk)
 		err := zw.WalkFile(ctx, disk, name, func(f zipwalk.File) error {
 			if cbErr != nil {
 				return cbErr
 			}
-			return fn(Entry{Path: f.Path, Size: f.Size, Modified: f.Modified, Read: f.Read})
+			return fn(Entry{Path: f.Path, Size: f.Size, Modified: f.Modified, Read: f.Read, InExport: export})
 		})
 		if cbErr != nil {
 			return cbErr

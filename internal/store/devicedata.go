@@ -57,7 +57,6 @@ func (s *Store) DeleteDeviceData(ctx context.Context, user, device int64) (Devic
 		out.From, out.To = from.Int64, to.Int64
 		days := map[string]bool{}
 		rows, err := tx.QueryContext(ctx, `SELECT day FROM daily_values WHERE raw_file_id IN (`+in+`)
-			UNION SELECT day FROM sleep_sessions WHERE raw_file_id IN (`+in+`)
 			UNION SELECT day FROM activities WHERE raw_file_id IN (`+in+`)`)
 		if err != nil {
 			return err
@@ -82,11 +81,24 @@ func (s *Store) DeleteDeviceData(ctx context.Context, user, device int64) (Devic
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM activities WHERE raw_file_id IN (`+in+`)`).Scan(&out.Activities); err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sleep_sessions WHERE raw_file_id IN (`+in+`)`).Scan(&out.Nights); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sleep_sessions s WHERE s.user_id = ? AND EXISTS (
+			SELECT 1 FROM sleep_parts p WHERE p.raw_file_id IN (`+in+`) AND p.user_id = s.user_id
+				AND p.start_ts < s.end_ts AND p.end_ts > s.start_ts)`, user).Scan(&out.Nights); err != nil {
+			return err
+		}
+		var nightFrom, nightTo sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MIN(start_ts), MAX(end_ts) FROM sleep_parts WHERE raw_file_id IN (`+in+`)`).
+			Scan(&nightFrom, &nightTo); err != nil {
 			return err
 		}
 		for _, id := range ids {
 			if err := deleteFileData(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		if nightFrom.Valid {
+			// Nights are merged from the parts that are left (another watch's, an export's).
+			if err := rebuildNights(ctx, tx, user, nightFrom.Int64, nightTo.Int64, zone, days); err != nil {
 				return err
 			}
 		}
@@ -110,6 +122,7 @@ func (s *Store) DeleteDeviceData(ctx context.Context, user, device int64) (Devic
 		out.Runs = int(n)
 		return nil
 	})
+	s.setZone(user, Zone{}, false) // the files' time-zone history went with them
 	return out, err
 }
 

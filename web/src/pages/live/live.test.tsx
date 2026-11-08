@@ -16,7 +16,7 @@ const now = Math.floor(Date.now() / 1000)
 
 function device(id: number, nickname: string): Device {
   return {
-    id, unit_id: 3_500_000_000 + id, product: 4536, model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname, firmware: '23.40', address: `AA:BB:CC:DD:EE:0${id}`,
+    id, unit_id: 3_500_000_000 + id, product: 4536, kind: 'watch', model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname, firmware: '23.40', address: `AA:BB:CC:DD:EE:0${id}`,
     after_fetch: 'archive', paused: false, delete_support: '', battery: 80, current: true, owned_from: 0, owned_to: null, paired: true,
     sync: { address: `AA:BB:CC:DD:EE:0${id}`, running: false, live: false, last_ok: true, pulled: 0, imported: 0, failures: 0, away: false },
   } as unknown as Device

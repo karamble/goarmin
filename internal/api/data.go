@@ -348,7 +348,7 @@ func activityJSON(a store.ActivitySummary) map[string]any {
 		"avg_hr": a.AvgHR, "max_hr": a.MaxHR, "avg_speed": a.AvgSpeed, "max_speed": a.MaxSpeed,
 		"avg_cadence": a.AvgCadence, "avg_power": a.AvgPower, "ascent_m": a.Ascent, "descent_m": a.Descent,
 		"training_effect": a.TrainingEffect, "anaerobic_effect": a.AnaerobicEffect, "training_load": a.TrainingLoad,
-		"polyline": a.Polyline}
+		"polyline": a.Polyline, "extra": a.Extra}
 	if a.MinLat != nil {
 		m["bounds"] = []float64{*a.MinLat, *a.MinLon, *a.MaxLat, *a.MaxLon}
 	}

@@ -3,13 +3,13 @@
 // license that can be found in the LICENSE file.
 
 import { useDevices } from '../../api/hooks/data'
-import { syncLine, toneDot } from '../../lib/devices'
+import { syncLine, toneDot, isWatch } from '../../lib/devices'
 import { Body } from '../CardFrame'
 import type { CardProps } from '../types'
 
 export default function DeviceStatus({ size, tz }: CardProps) {
   const q = useDevices()
-  const d = q.data?.find((x) => x.current)
+  const d = q.data?.find((x) => x.current && isWatch(x))
   const line = d ? syncLine(d, tz) : null
   return (
     <Body q={[q]} empty={!d} size={size} emptyText="No watch yet">

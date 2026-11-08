@@ -482,4 +482,278 @@ CREATE TABLE usb_seen (
 	PRIMARY KEY (serial, path)
 ) WITHOUT ROWID;
 `,
+	// 11: nights from parts. Each file's account of a sleep is a part (a sleep file's stages, the
+	// daily-health or metrics file's summary, an export's record); sleep_sessions holds the nights
+	// merged from the parts that overlap, rebuilt whenever parts change, so one sleep is one night
+	// whatever files describe it. The nights stored so far become parts of their files. Naps.
+	`
+CREATE TABLE sleep_parts (
+	user_id INTEGER NOT NULL,
+	raw_file_id INTEGER NOT NULL,
+	source TEXT NOT NULL,                       -- stages, summary, json, legacy
+	prio INTEGER NOT NULL,                      -- which part leads a night: stages 3, summary and legacy 2, json 1
+	start_ts INTEGER NOT NULL,
+	end_ts INTEGER NOT NULL,
+	score INTEGER,
+	quality_score INTEGER,
+	duration_score INTEGER,
+	recovery_score INTEGER,
+	min_hr INTEGER,
+	bb_start INTEGER,
+	bb_end INTEGER,
+	deep_s INTEGER,
+	light_s INTEGER,
+	rem_s INTEGER,
+	awake_s INTEGER,
+	unmeasurable_s INTEGER,
+	PRIMARY KEY (raw_file_id, start_ts)
+);
+CREATE INDEX sleep_parts_user ON sleep_parts(user_id, start_ts);
+
+INSERT OR IGNORE INTO sleep_parts (user_id, raw_file_id, source, prio, start_ts, end_ts, score, quality_score, duration_score,
+	recovery_score, min_hr, bb_start, bb_end, deep_s, light_s, rem_s, awake_s, unmeasurable_s)
+	SELECT user_id, raw_file_id, 'legacy', 2, start_ts, end_ts, score, quality_score, duration_score,
+	recovery_score, min_hr, bb_start, bb_end, deep_s, light_s, rem_s, awake_s, unmeasurable_s FROM sleep_sessions;
+
+CREATE TABLE naps (
+	user_id INTEGER NOT NULL,
+	start_ts INTEGER NOT NULL,
+	end_ts INTEGER NOT NULL,
+	day TEXT NOT NULL,                          -- local date
+	feedback INTEGER,                           -- FIT nap_period_feedback
+	how INTEGER,                                -- FIT nap_source: 0 automatic, 1 manual, …
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, start_ts)
+);
+CREATE INDEX naps_day ON naps(user_id, day);
+CREATE INDEX naps_file ON naps(raw_file_id);
+`,
+	// 12: samples lose their index by file: a file's samples lie within the span its ingest
+	// recorded, where the primary key finds them, and the index made every insert of a large
+	// import a third dearer.
+	`
+DROP INDEX samples_file;
+`,
+	// 13: what sort of device each is (product.Kind: watch, scale, bike_computer, sensor,
+	// handheld, app, other); '' until classified (at start, from the product and the files).
+	`
+ALTER TABLE devices ADD COLUMN kind TEXT NOT NULL DEFAULT '';
+`,
+	// 14: every FIT reader's tables. Weigh-ins (a scale's files, the export's biometrics), the
+	// nightly skin temperature, ECG recordings with their samples, physiological metrics, gear,
+	// golf clubs, personal records, the settings change log, device series (solar charge) and
+	// device documents (what a settings, device or multisport file holds beyond the tables).
+	`
+CREATE TABLE weigh_ins (
+	user_id INTEGER NOT NULL,
+	ts INTEGER NOT NULL,
+	weight_kg REAL NOT NULL,
+	fat_pct REAL,
+	hydration_pct REAL,
+	bone_kg REAL,
+	muscle_kg REAL,
+	visceral_fat_kg REAL,
+	bmi REAL,
+	bmr_kcal INTEGER,
+	active_mr_kcal INTEGER,
+	metabolic_age INTEGER,
+	visceral_rating INTEGER,
+	build INTEGER,                              -- the scale's physique rating
+	source TEXT NOT NULL,                       -- fit, json
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, ts)
+);
+CREATE INDEX weigh_ins_file ON weigh_ins(raw_file_id);
+
+CREATE TABLE skin_temp_nightly (
+	user_id INTEGER NOT NULL,
+	day TEXT NOT NULL,
+	ts INTEGER NOT NULL,
+	nightly_c REAL,
+	deviation_c REAL,
+	deviation7d_c REAL,
+	calibrated_days INTEGER,
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, day)
+);
+CREATE INDEX skin_temp_nightly_file ON skin_temp_nightly(raw_file_id);
+
+CREATE TABLE ecg_recordings (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL,
+	start_ts INTEGER NOT NULL,
+	day TEXT NOT NULL,
+	class INTEGER,                              -- ecg_rhythm_classification
+	side INTEGER,
+	avg_hr REAL,
+	rmssd_ms INTEGER,
+	seconds INTEGER,
+	raw_rate REAL,
+	smooth_rate REAL,
+	samples BLOB,                               -- gzip JSON {"raw": [...], "smooth": [...]}
+	source TEXT NOT NULL,                       -- fit, json
+	raw_file_id INTEGER NOT NULL,
+	UNIQUE (user_id, start_ts)
+);
+CREATE INDEX ecg_recordings_file ON ecg_recordings(raw_file_id);
+
+CREATE TABLE physiology (
+	user_id INTEGER NOT NULL,
+	ts INTEGER NOT NULL,
+	sport TEXT NOT NULL DEFAULT '',
+	vo2max REAL,
+	lthr INTEGER,
+	lt_power INTEGER,
+	lt_speed_kmh REAL,
+	max_hr INTEGER,
+	avg_hr INTEGER,
+	recovery_min INTEGER,
+	aerobic_te REAL,
+	anaerobic_te REAL,
+	duration_s REAL,
+	distance_m REAL,
+	race_5k_s INTEGER,
+	race_10k_s INTEGER,
+	race_half_s INTEGER,
+	race_marathon_s INTEGER,
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, ts)
+);
+CREATE INDEX physiology_file ON physiology(raw_file_id);
+
+CREATE TABLE gear (
+	user_id INTEGER NOT NULL,
+	uuid TEXT NOT NULL,
+	source TEXT NOT NULL,                       -- fit, json
+	type TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL DEFAULT '',
+	brand TEXT NOT NULL DEFAULT '',
+	model TEXT NOT NULL DEFAULT '',
+	data TEXT NOT NULL DEFAULT '{}',            -- JSON: everything else the source says
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, uuid, source)
+);
+CREATE INDEX gear_file ON gear(raw_file_id);
+
+CREATE TABLE golf_clubs (
+	user_id INTEGER NOT NULL,
+	device_id INTEGER NOT NULL DEFAULT 0,
+	idx INTEGER NOT NULL,
+	type INTEGER,
+	name TEXT NOT NULL DEFAULT '',
+	avg_distance_m REAL,
+	max_distance_m REAL,
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, device_id, idx)
+);
+CREATE INDEX golf_clubs_file ON golf_clubs(raw_file_id);
+
+CREATE TABLE personal_records (
+	user_id INTEGER NOT NULL,
+	source TEXT NOT NULL,                       -- fit, json
+	metric TEXT NOT NULL,                       -- the source's record kind ("@distance" for one over a distance)
+	sport TEXT NOT NULL DEFAULT '',
+	ts INTEGER NOT NULL,
+	value REAL,
+	distance_m REAL,
+	activity_id INTEGER,
+	data TEXT NOT NULL DEFAULT '{}',
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, source, metric, sport)
+);
+CREATE INDEX personal_records_file ON personal_records(raw_file_id);
+
+CREATE TABLE settings_changes (
+	user_id INTEGER NOT NULL,
+	device_id INTEGER NOT NULL DEFAULT 0,
+	ts INTEGER NOT NULL,
+	message TEXT NOT NULL,
+	field TEXT NOT NULL,
+	value TEXT NOT NULL DEFAULT '',
+	kind TEXT NOT NULL DEFAULT '',
+	sport TEXT NOT NULL DEFAULT '',
+	raw_file_id INTEGER NOT NULL
+);
+CREATE INDEX settings_changes_user ON settings_changes(user_id, device_id, ts);
+CREATE INDEX settings_changes_file ON settings_changes(raw_file_id);
+
+CREATE TABLE device_series (
+	user_id INTEGER NOT NULL,
+	device_id INTEGER NOT NULL,
+	kind TEXT NOT NULL,                         -- solar (percent), solar_gain (ms)
+	ts INTEGER NOT NULL,                        -- the start of an hour
+	value REAL NOT NULL,
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, device_id, kind, ts)
+) WITHOUT ROWID;
+CREATE INDEX device_series_file ON device_series(raw_file_id);
+
+CREATE TABLE device_documents (
+	user_id INTEGER NOT NULL,
+	device_id INTEGER NOT NULL,
+	kind TEXT NOT NULL,                         -- device, settings, multisport
+	data TEXT NOT NULL,                         -- JSON: message name → the messages
+	recorded_at INTEGER NOT NULL,
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, device_id, kind)
+);
+CREATE INDEX device_documents_file ON device_documents(raw_file_id);
+`,
+	// 15: a Garmin Connect export's files read. Daily values rank by source (a watch's FIT file
+	// 2 over the export's JSON 1); activities keep what only Garmin Connect knows; health status,
+	// hydration and health snapshots; the account's records as documents.
+	`
+ALTER TABLE daily_values ADD COLUMN rank INTEGER NOT NULL DEFAULT 2;
+CREATE INDEX daily_values_day ON daily_values(user_id, day);
+ALTER TABLE activities ADD COLUMN extra TEXT NOT NULL DEFAULT '{}';
+
+CREATE TABLE health_status (
+	user_id INTEGER NOT NULL,
+	day TEXT NOT NULL,
+	metric TEXT NOT NULL,                       -- hrv, hr, respiration, skin_temp_c, spo2, …
+	value REAL,
+	low REAL,
+	high REAL,
+	pct REAL,
+	status TEXT NOT NULL DEFAULT '',
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, day, metric)
+);
+CREATE INDEX health_status_file ON health_status(raw_file_id);
+
+CREATE TABLE hydration_logs (
+	user_id INTEGER NOT NULL,
+	ts INTEGER NOT NULL,
+	day TEXT NOT NULL,
+	ml REAL NOT NULL,
+	sweat_ml REAL NOT NULL DEFAULT 0,
+	source TEXT NOT NULL DEFAULT '',
+	activity_id INTEGER,
+	raw_file_id INTEGER NOT NULL
+);
+CREATE INDEX hydration_logs_day ON hydration_logs(user_id, day);
+CREATE INDEX hydration_logs_file ON hydration_logs(raw_file_id);
+
+CREATE TABLE health_snapshots (
+	user_id INTEGER NOT NULL,
+	start_ts INTEGER NOT NULL,
+	end_ts INTEGER NOT NULL,
+	day TEXT NOT NULL,
+	name TEXT NOT NULL DEFAULT '',
+	data TEXT NOT NULL DEFAULT '{}',
+	raw_file_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, start_ts)
+);
+CREATE INDEX health_snapshots_file ON health_snapshots(raw_file_id);
+
+CREATE TABLE account_documents (
+	raw_file_id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL,
+	kind TEXT NOT NULL,                         -- profile, settings, orders, consents, inreach_billing, …
+	name TEXT NOT NULL DEFAULT '',              -- the file's path in the export
+	data TEXT NOT NULL,                         -- JSON
+	recorded_at INTEGER NOT NULL
+);
+CREATE INDEX account_documents_user ON account_documents(user_id, kind);
+`,
 }

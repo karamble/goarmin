@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -101,13 +102,22 @@ func (f File) Read() ([]byte, error) {
 type Walker struct {
 	Limits
 	// Skipped hears of each entry left out, and why.
-	Skipped func(path string, err error)
-	// Archives counts the archives opened, the top ones included.
-	Archives int
+	Skipped  func(path string, err error)
+	archives atomic.Int64 // opened, the top ones included (Archives)
+	found    atomic.Int64 // files in the archives opened so far, nested archives left out (Found)
 
 	entries int
 	total   int64
 }
+
+// Archives counts the archives opened so far, the top ones included. It may be read while a
+// walk runs, from any goroutine.
+func (w *Walker) Archives() int { return int(w.archives.Load()) }
+
+// Found counts the files of the archives opened so far that the walk hands over or skips
+// (nested archives are walked into, not counted). With Archives it shows an import's progress:
+// a nested archive adds its files when it is opened. It may be read while a walk runs.
+func (w *Walker) Found() int { return int(w.found.Load()) }
 
 // WalkFile walks the archive at name.
 func (w *Walker) WalkFile(ctx context.Context, name, prefix string, fn func(File) error) error {
@@ -141,7 +151,14 @@ func (w *Walker) walk(ctx context.Context, r io.ReaderAt, size int64, prefix str
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrNotZip, err)
 	}
-	w.Archives++
+	w.archives.Add(1)
+	var n int64
+	for _, zf := range zr.File {
+		if name, ok := clean(zf.Name); ok && !strings.EqualFold(path.Ext(name), ".zip") {
+			n++
+		}
+	}
+	w.found.Add(n)
 	for _, zf := range zr.File {
 		if err := ctx.Err(); err != nil {
 			return err

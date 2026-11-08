@@ -119,8 +119,11 @@ func TestNestedArchives(t *testing.T) {
 	if !errors.Is(f.skipped["DI_CONNECT/Part1.zip/l3.zip/deeper.zip"], ErrDepth) || !errors.Is(f.skipped["fake.zip"], ErrNotZip) || len(f.skipped) != 2 {
 		t.Fatalf("skipped %v", f.skipped)
 	}
-	if w.Archives != 4 { // top, Part1, l3, big (from a temporary file)
-		t.Fatalf("archives = %d", w.Archives)
+	if w.Archives() != 4 { // top, Part1, l3, big (from a temporary file)
+		t.Fatalf("archives = %d", w.Archives())
+	}
+	if w.Found() != len(wantFiles) { // the files handed over; archives (nested or not, broken or too deep) are not files
+		t.Fatalf("found = %d, want %d", w.Found(), len(wantFiles))
 	}
 	if left, _ := os.ReadDir(w.TempDir); len(left) != 0 {
 		t.Fatalf("temporary files left: %v", left)

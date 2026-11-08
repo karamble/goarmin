@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -300,8 +301,12 @@ func (r *Runner) run(ctx context.Context, id int64) {
 	zw := &zipwalk.Walker{Limits: r.opt.Limits}
 	opt := ingest.ImportOptions{Source: imp.Source}
 	last := time.Now()
+	plain := 0 // uploaded files that are no archive: known from the start
 	opt.Progress = func(rep ingest.Report) {
-		rep.Archives = zw.Archives
+		rep.Archives = zw.Archives()
+		if zw.Archives() > 0 || plain > 0 {
+			rep.Found = plain + zw.Found()
+		}
 		r.mu.Lock()
 		j.rep = snapshot(rep)
 		r.mu.Unlock()
@@ -327,6 +332,11 @@ func (r *Runner) run(ctx context.Context, id int64) {
 		}
 		zw.TempDir = r.staging(id)
 		src = ingest.Staged(files, zw)
+		for _, f := range files {
+			if !strings.EqualFold(filepath.Ext(f.Name), ".zip") {
+				plain++
+			}
+		}
 	case store.ImportUSB:
 		watch, err = r.findWatch(ctx, watchID)
 		if err == nil {
@@ -346,7 +356,10 @@ func (r *Runner) run(ctx context.Context, id int64) {
 		return
 	}
 	rep, err := r.opt.In.ImportFrom(jctx, user, src, opt)
-	rep.Archives = zw.Archives
+	rep.Archives = zw.Archives()
+	if zw.Archives() > 0 || plain > 0 {
+		rep.Found = plain + zw.Found()
+	}
 	if rep.Export && imp.Source != store.SourceGCExport {
 		imp.Source = store.SourceGCExport
 		_ = r.opt.Store.SetImportSource(ctx, id, store.SourceGCExport, imp.Name)

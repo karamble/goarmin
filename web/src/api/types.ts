@@ -427,10 +427,14 @@ export interface SyncStatus {
 
 export type AfterFetch = 'keep' | 'archive' | 'archive_delete'
 
+/** What sort of device it is: only a watch syncs, streams live values or is paired. */
+export type DeviceKind = 'watch' | 'scale' | 'bike_computer' | 'sensor' | 'handheld' | 'app' | 'other'
+
 export interface Device {
   id: number
   unit_id: number
   product: number
+  kind: DeviceKind
   /** The model ("Fenix 8"). */
   model: string
   /** The watch's own Bluetooth name ("fenix 8 - 47mm"). */
@@ -464,6 +468,7 @@ export interface AdminWatch {
   id: number
   unit_id: number
   model: string
+  kind: DeviceKind
   name: string
   address: string
   owner: { id: number; email: string; name: string } | null
@@ -533,6 +538,8 @@ export interface WatchFile {
   state: 'pending' | 'kept' | 'archived' | 'deleted' | 'gone'
   on_watch: boolean
   deletable: boolean
+  /** The stored copy, for the inspector (absent when goarmin has none). */
+  file_id?: number
 }
 
 /** This computer's Bluetooth adapter (GET /api/bluetooth). */
@@ -653,6 +660,11 @@ export interface ImportReport {
   other?: number
   archives?: number
   bytes?: number
+  /** Every file dealt with so far; found: how many the import knows of (a zip's nested archives
+   * add theirs when they are opened; absent when it cannot tell); current: the path being read. */
+  read?: number
+  found?: number
+  current?: string
   errors?: string[]
   errors_more?: number
 }
@@ -694,4 +706,179 @@ export interface USBWatch {
   auto: boolean | null
   importing: ImportRun | null
   last: ImportRun | null
+}
+
+// What the readers store beyond days, nights and activities (M6b).
+
+export interface WeighIn {
+  ts: number
+  day: string
+  weight_kg: number
+  fat_pct: number | null
+  hydration_pct: number | null
+  bone_kg: number | null
+  muscle_kg: number | null
+  visceral_fat_kg: number | null
+  bmi: number | null
+  bmr_kcal: number | null
+  active_mr_kcal: number | null
+  metabolic_age: number | null
+  visceral_rating: number | null
+  source: 'fit' | 'json'
+}
+
+export interface SkinTempNight {
+  day: string
+  ts: number
+  nightly_c: number | null
+  deviation_c: number | null
+  deviation_7d_c: number | null
+  calibrated_days: number | null
+}
+
+export interface Body {
+  weigh_ins: WeighIn[]
+  skin_temp: SkinTempNight[]
+}
+
+export interface ECGSummary {
+  id: number
+  start: number
+  day: string
+  class: string
+  avg_hr: number | null
+  rmssd_ms: number | null
+  seconds: number | null
+  raw_rate: number | null
+  smooth_rate: number | null
+  source: 'fit' | 'json'
+}
+
+export interface ECGRecording extends ECGSummary {
+  samples: { raw: number[] | null; smooth: number[] | null } | null
+}
+
+export interface NapRow {
+  start: number
+  end: number
+  day: string
+  feedback: number | null
+  how: number | null
+}
+
+export interface HealthStatusRow {
+  day: string
+  metric: string
+  status: string
+  value: number | null
+  low: number | null
+  high: number | null
+  pct: number | null
+}
+
+export interface HydrationRow {
+  ts: number
+  day: string
+  source: string
+  ml: number
+  sweat_ml: number
+}
+
+export interface PersonalRecordRow {
+  source: 'fit' | 'json'
+  metric: string
+  sport: string
+  ts: number
+  value: number | null
+  distance_m: number | null
+  activity_id: number | null
+  data: Record<string, unknown>
+}
+
+export interface GearRow {
+  uuid: string
+  source: 'fit' | 'json'
+  type: string
+  name: string
+  brand: string
+  model: string
+  data: Record<string, unknown>
+  distance_m?: number
+  uses?: number
+}
+
+export interface SolarSeries {
+  from: number
+  to: number
+  solar: { t: number[]; v: number[] }
+  solar_gain: { t: number[]; v: number[] }
+}
+
+export interface SettingsChange {
+  ts: number
+  message: string
+  field: string
+  value: string
+  kind: string
+  sport: string
+}
+
+export interface DeviceDocument {
+  kind: string
+  recorded_at: number
+  data: Record<string, Record<string, unknown>[]>
+}
+
+export interface StoredFile {
+  id: number
+  name: string
+  source: string
+  size: number
+  received_at: number
+  device_id: number | null
+  fit_type: number | null
+  type_name: string
+  created: number | null
+}
+
+export interface FilePage {
+  items: StoredFile[]
+  next_before: number | null
+}
+
+export interface NamedField {
+  num: number
+  name: string
+  units?: string
+  value: unknown
+  raw?: unknown
+  known: boolean
+}
+
+export interface NamedMessage {
+  num: number
+  name: string
+  known: boolean
+  official: boolean
+  fields: NamedField[]
+}
+
+export interface FileMessages {
+  file: StoredFile
+  counts: { num: number; name: string; count: number; known: boolean; official: boolean }[]
+  messages: NamedMessage[]
+  total: number
+  offset: number
+  error?: string
+}
+
+export interface AccountDocumentRow {
+  id: number
+  kind: string
+  name: string
+  recorded_at: number
+}
+
+export interface AccountDocument extends AccountDocumentRow {
+  data: unknown
 }

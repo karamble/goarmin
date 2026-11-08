@@ -274,3 +274,52 @@ copy a watch's GARMIN folder; `goarmin import -usb` imports one from the command
 **Limits on archives.** At most 200,000 entries and 20 GiB uncompressed per import, 64 MiB per
 file, archives nested three deep, and no entry compressed more than 200 times (over 1 MiB). An
 archive beyond them is reported in `errors` and the rest goes on.
+
+**Progress.** While an import runs, its `report` also carries `read` (files dealt with so far),
+`found` (files the import knows of: a zip's nested archives add theirs when they are opened;
+absent when it cannot tell) and `current` (the path being read).
+
+## Devices of every kind
+
+`GET /api/devices` lists watches, scales and other devices alike; each has `kind`: `watch`,
+`scale`, `bike_computer`, `sensor`, `handheld`, `app` or `other`. What only a watch does answers
+409 for another kind ("this device is a scale, not a watch"): `POST …/sync`, `GET …/live`,
+`GET …/files`, `POST …/files/delete`, `POST …/unpair`, `POST …/release {"unpair": true}` and
+`PATCH` of `after_fetch`, `paused` or `usb_auto`. A nickname can be set on any device.
+
+| Route | Answers |
+|---|---|
+| `GET /api/devices/{id}/solar` | Solar charge in hourly buckets: `{from, to, solar: {t, v}, solar_gain: {t, v}}` (percent, battery ms gained). `?from&to` (days), else the device's last 7 days with data |
+| `GET /api/devices/{id}/changes?before=` | The watch's settings change log, newest first, 100 a page: `{items: [{ts, message, field, value, kind, sport}], next_before}` |
+| `GET /api/devices/{id}/documents` | What its settings, device and multisport files hold beyond the tables: `[{kind, recorded_at, data: {message: [fields…]}}]` |
+
+## Files and the inspector
+
+| Route | Answers |
+|---|---|
+| `GET /api/files?type=&device=&before=&limit=` | The account's stored files, newest first (copies left out): `{items: [{id, name, source, size, received_at, device_id, fit_type, type_name, created}], next_before}`. `type` is a FIT file type or `other` (not FIT) |
+| `GET /api/files/{id}/messages?num=&offset=&limit=` | A FIT file decoded on request: `{file, counts: [{num, name, count, known, official}], messages: [{num, name, known, official, fields: [{num, name, units, value, raw, known}]}], total, offset}`; values scaled, times as RFC 3339, enumerations by name, unknown messages and fields by number. `error` when the file breaks off. 422 for a file that is not FIT |
+| `GET /api/files/{id}/download` | The file as it arrived |
+
+Another account's file is 404.
+
+## More health and training data
+
+| Route | Answers |
+|---|---|
+| `GET /api/naps?from&to` | `[{start, end, day, feedback, how}]` |
+| `GET /api/body?from&to` | `{weigh_ins: [{ts, day, weight_kg, fat_pct, hydration_pct, bone_kg, muscle_kg, visceral_fat_kg, bmi, bmr_kcal, active_mr_kcal, metabolic_age, visceral_rating, source}], skin_temp: [{day, ts, nightly_c, deviation_c, deviation_7d_c, calibrated_days}]}`. A scale's own weigh-in wins over the export's record of it |
+| `GET /api/ecg`, `GET /api/ecg/{id}` | ECG recordings `{id, start, day, class, avg_hr, rmssd_ms, seconds, raw_rate, smooth_rate, source}`; one with `samples: {raw, smooth}` |
+| `GET /api/physiology?from&to` | Physiological metrics after activities: VO2 max, lactate threshold, max HR, recovery, training effects, race times |
+| `GET /api/health-status?from&to` | Garmin Connect's health status per day and metric: `{day, metric, status, value, low, high, pct}` |
+| `GET /api/hydration?from&to` | Logged drinks `{ts, day, source, ml, sweat_ml}` |
+| `GET /api/snapshots?from&to` | Health snapshots `{start, end, day, name, data}` |
+| `GET /api/records` | Personal records `{source, metric, sport, ts, value, distance_m, activity_id, data}`: Garmin Connect's (times in s, distances in m) and the watch's own; `activity_id` is goarmin's |
+| `GET /api/gear` | Gear `{uuid, source, type, name, brand, model, data, distance_m?, uses?}`; Garmin Connect's with the distance of the activities it was used in |
+| `GET /api/golf-clubs` | The watch's golf clubs |
+| `GET /api/account/documents`, `GET /api/account/documents/{id}` | The account's records from a Garmin Connect export (profile, settings, orders, consents, inReach, …): a list of `{id, kind, name, recorded_at}`, one with `data` |
+
+`/api/daily` values gain the export's and the new readers' kinds (weight, body_fat, bmi,
+skin_temp_deviation, recovery_time, acwr, heat_acclimation, fitness_age, hydration, the daily
+summaries' day_* values, …; `/api/metrics` lists them all). A watch's own value of a day wins
+over the export's. Activities carry `extra`: what only Garmin Connect knows about them.

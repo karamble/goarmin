@@ -26,7 +26,8 @@ func recordedAt(f RawFile, w *fitwatch.File) int64 {
 	return f.ReceivedAt.Unix()
 }
 
-var watchTables = []string{"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "courses"}
+var watchTables = []string{"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "courses",
+	"gear", "golf_clubs", "personal_records", "settings_changes", "device_series", "device_documents"}
 
 // WriteWatchFile replaces what a settings, sport, workout, course, totals or goals file
 // contributed. Per key (the watch's settings, a sport profile, a goal type, a sport's totals,
@@ -42,6 +43,9 @@ func (s *Store) WriteWatchFile(ctx context.Context, f RawFile, w *fitwatch.File)
 			if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE raw_file_id = ?`, f.ID); err != nil {
 				return err
 			}
+		}
+		if err := writeDeviceData(ctx, tx, f, w, at); err != nil {
+			return err
 		}
 		if w.Settings != nil {
 			data, err := js(w.Settings)

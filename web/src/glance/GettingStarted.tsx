@@ -6,6 +6,7 @@ import { Check, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { usePasskeys } from '../api/hooks/auth'
 import { useDailyWindow, useDevices } from '../api/hooks/data'
+import { isWatch } from '../lib/devices'
 import { usePrefs, useSavePrefs } from '../api/hooks/prefs'
 import type { Me } from '../api/types'
 import { today } from '../lib/period'
@@ -28,7 +29,7 @@ export function GettingStarted({ me }: { me: Me }) {
   const devs = useDevices()
   const days = useDailyWindow(today(me.timezone), 14)
   if (!prefs.loaded || prefs.onboardingDone || keys.isPending || devs.isPending || days.isPending) return null
-  const current = (devs.data ?? []).filter((d) => d.current)
+  const current = (devs.data ?? []).filter((d) => d.current && isWatch(d))
   const hasData = (days.data ?? []).some((d) => (d.steps ?? 0) > 0 || d.sleep_score != null)
   const steps: Step[] = [
     { key: 'passkey', done: (keys.data ?? []).length > 0, title: 'Add a passkey', text: 'Sign in with your fingerprint, face or security key instead of the password.', to: '/settings/security', action: 'Add a passkey' },

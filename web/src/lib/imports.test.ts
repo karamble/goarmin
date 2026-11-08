@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { USBWatch } from '../api/types'
-import { finished, howWords, isExportPath, keptFolders, ownerWords, reportLine, selectionName, sortPicked, usbWatchName, wanted, type Picked } from './imports'
+import { elapsedWords, finished, howWords, importProgress, isExportPath, keptFolders, ownerWords, rateWords, reportLine, selectionName, sortPicked, usbWatchName, wanted, type Picked } from './imports'
 
 const pick = (path: string, size = 10): Picked => ({ file: new File([new Uint8Array(size)], path.split('/').pop()!), path })
 
@@ -45,6 +45,24 @@ describe('reports', () => {
     expect(keptFolders({ kept_by: { 'DI-Connect-User': 2, 'DI-Connect-Fitness': 40, 'DI-Connect-Aggregator': 2 } }))
       .toEqual([['DI-Connect-Fitness', 40], ['DI-Connect-Aggregator', 2], ['DI-Connect-User', 2]])
     expect(keptFolders({})).toEqual([])
+  })
+
+  it('writes large counts with separators', () => {
+    expect(reportLine({ seen: 12072, known: 12072 })).toBe('0 new, 12,072 already here')
+  })
+
+  it('tells how far a running import has come', () => {
+    expect(importProgress({ read: 1200, found: 12281 })).toEqual({ read: 1200, found: 12281, pct: 9 })
+    expect(importProgress({ read: 30 })).toEqual({ read: 30, found: 30, pct: 100 })
+    expect(importProgress({})).toEqual({ read: 0, found: 0, pct: null })
+    // A nested archive not opened yet: never more than all.
+    expect(importProgress({ read: 50, found: 40 }).pct).toBe(100)
+    expect(elapsedWords(42)).toBe('42 s')
+    expect(elapsedWords(185)).toBe('3 min 05 s')
+    expect(elapsedWords(3720)).toBe('1 h 02 min')
+    expect(rateWords(1200, 10)).toBe('120 files/s')
+    expect(rateWords(15, 10)).toBe('1.5 files/s')
+    expect(rateWords(10, 1)).toBe('')
   })
 
   it('knows when an import is over', () => {

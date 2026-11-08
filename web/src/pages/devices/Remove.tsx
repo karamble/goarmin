@@ -8,16 +8,16 @@ import { useNavigate } from 'react-router-dom'
 import { errorText } from '../../api/client'
 import { useDeleteData, useDeviceSummary, useRelease, useUnpair } from '../../api/hooks/devices'
 import type { Device } from '../../api/types'
-import { watchName } from '../../lib/devices'
+import { deviceName, isWatch, kindWord } from '../../lib/devices'
 import { bytes, int } from '../../lib/format'
 import { Confirm } from '../../ui/Sheet'
 import { useToast } from '../../ui/Toast'
 
-/** Remove offers what can be done when a watch goes: unpair it, hand it over, delete its data. */
+/** Remove offers what can be done when a device goes: unpair a watch, hand it over, delete its data. */
 export function Remove({ d, serverSyncs }: { d: Device; serverSyncs: boolean }) {
   const [ask, setAsk] = useState<'unpair' | 'handover' | 'delete' | null>(null)
   const sum = useDeviceSummary(d.id)
-  const name = watchName(d)
+  const name = deviceName(d)
   // The requests live here, not in the dialogs: a dialog closes at once, and a mutation whose
   // component is gone never reports back.
   const unpair = useUnpair(d.id)
@@ -30,21 +30,21 @@ export function Remove({ d, serverSyncs }: { d: Device; serverSyncs: boolean }) 
   })
   const doRelease = (alsoUnpair: boolean) => release.mutate(alsoUnpair, {
     onSuccess: () => {
-      toast({ text: 'Handed over. Whoever adds it next owns it from then on.' })
+      toast({ text: isWatch(d) ? 'Handed over. Whoever adds it next owns it from then on.' : `Handed over. Whoever imports this ${kindWord(d.kind)}'s files next owns it from then on.` })
       navigate('/devices/watches')
     },
     onError: (e) => toast({ tone: 'error', text: errorText(e) }),
   })
   return (
     <div className="grid gap-4">
-      {d.current && serverSyncs && d.paired && (
+      {d.current && serverSyncs && d.paired && isWatch(d) && (
         <Action icon={<Unlink size={18} />} title="Unpair from this computer"
           text="goarmin stops syncing it. The watch stays yours with all its data; add it again any time under Add a watch."
           button="Unpair…" onClick={() => setAsk('unpair')} />
       )}
       {d.current && (
         <Action icon={<Handshake size={18} />} title="Hand it over"
-          text="It stops being yours now. What it recorded so far stays in your account; whoever adds it next owns it from then on."
+          text={`It stops being yours now. What it recorded so far stays in your account; whoever ${isWatch(d) ? 'adds it' : 'imports its files'} next owns it from then on.`}
           button="Hand over…" onClick={() => setAsk('handover')} />
       )}
       <Action icon={<Trash2 size={18} />} title="Delete its data" danger
@@ -93,7 +93,7 @@ function Action({ icon, title, text, button, onClick, danger, disabled, extra }:
 
 function UnpairDialog({ d, onConfirm, onClose }: { d: Device; onConfirm: () => void; onClose: () => void }) {
   return (
-    <Confirm title={`Unpair ${watchName(d)}?`} confirm="Unpair" onClose={onClose} onConfirm={onConfirm}>
+    <Confirm title={`Unpair ${deviceName(d)}?`} confirm="Unpair" onClose={onClose} onConfirm={onConfirm}>
       This computer forgets the watch and stops syncing it. Nothing is deleted.
     </Confirm>
   )
@@ -107,7 +107,7 @@ function HandoverDialog({ d, serverSyncs, onConfirm, onClose }: {
 }) {
   const [unpair, setUnpair] = useState(false)
   return (
-    <Confirm title={`Hand over ${watchName(d)}?`} confirm="Hand over" danger onClose={onClose}
+    <Confirm title={`Hand over ${deviceName(d)}?`} confirm="Hand over" danger onClose={onClose}
       onConfirm={() => onConfirm(serverSyncs && unpair)}>
       <span className="block">It stops being yours now. What it recorded until now stays in your account, and you can still look at it.</span>
       {serverSyncs && d.paired && (

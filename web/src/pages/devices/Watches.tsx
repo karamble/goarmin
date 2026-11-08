@@ -10,15 +10,16 @@ import { useDevices } from '../../api/hooks/data'
 import { useSyncNow } from '../../api/hooks/devices'
 import type { Device } from '../../api/types'
 import { HeaderActions } from '../../app/section/HeaderSlot'
-import { alerts, subtitle, syncLine, toneDot, watchName } from '../../lib/devices'
+import { alerts, deviceName, groupDevices, isWatch, kindWord, subtitle, syncLine, toneDot } from '../../lib/devices'
 import { ago } from '../../lib/format'
 import { relDay, today } from '../../lib/period'
 import { Skeleton } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
 import { BluetoothStrip } from './BluetoothStrip'
-import { WatchGlyph } from './WatchGlyph'
+import { DeviceGlyph } from './DeviceGlyph'
 
-/** Watches lists the person's watches, the Bluetooth adapter, and watches they had before. */
+/** Devices lists the person's devices grouped by kind (watches, scales, …), the Bluetooth
+ * adapter, and devices they had before. Every device is a data source; only watches sync. */
 export default function Watches() {
   const me = useMe().data!
   const q = useDevices()
@@ -27,6 +28,8 @@ export default function Watches() {
   const current = list.filter((d) => d.current)
   const earlier = list.filter((d) => !d.current)
   const problems = alerts(current)
+  const groups = groupDevices(current)
+  const watches = current.filter(isWatch)
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
       {me.server.sync && (
@@ -62,18 +65,33 @@ export default function Watches() {
           )}
         </div>
       ) : (
-        <ul className="m-0 grid list-none gap-4 p-0 md:grid-cols-2 xl:grid-cols-3">
-          {current.map((d) => <WatchCard key={d.id} d={d} tz={tz} serverSyncs={me.server.sync} />)}
-        </ul>
+        <>
+          {watches.length === 0 && (
+            <p className="card m-0 px-4 py-3 text-[14px] text-muted">
+              No watch yet.{me.server.sync && <> <Link to="/devices/add" className="text-lime hover:underline">Add a watch</Link> to sync it over Bluetooth.</>}
+            </p>
+          )}
+          {groups.map((g) => (
+            <section key={g.kind} aria-labelledby={`group-${g.kind}`} className="grid gap-3">
+              {groups.length > 1 && <h2 id={`group-${g.kind}`} className="caps m-0">{g.title} <span className="text-faint">{g.devices.length}</span></h2>}
+              <ul aria-label={g.title} className="m-0 grid list-none gap-4 p-0 md:grid-cols-2 xl:grid-cols-3">
+                {g.devices.map((d) => isWatch(d)
+                  ? <WatchCard key={d.id} d={d} tz={tz} serverSyncs={me.server.sync} />
+                  : <DeviceCard key={d.id} d={d} />)}
+              </ul>
+            </section>
+          ))}
+        </>
       )}
       {earlier.length > 0 && (
         <details className="card px-4 py-3">
-          <summary className="cursor-pointer text-[14px] text-muted">Watches you had before ({earlier.length})</summary>
+          <summary className="cursor-pointer text-[14px] text-muted">Devices you had before ({earlier.length})</summary>
           <ul className="m-0 mt-3 grid list-none gap-1 p-0">
             {earlier.map((d) => (
               <li key={d.id}>
                 <Link to={`/devices/watches/${d.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-panel2">
-                  <span className="flex-1 truncate text-[14px]">{watchName(d)}</span>
+                  <span className="flex-1 truncate text-[14px]">{deviceName(d)}</span>
+                  {!isWatch(d) && <span className="text-[12px] text-muted">{kindWord(d.kind)}</span>}
                   <span className="font-mono text-[12px] text-faint">
                     {d.owned_from ? relDay(today(tz, new Date(d.owned_from * 1000)), today(tz)) : 'from the start'} –{' '}
                     {d.owned_to ? relDay(today(tz, new Date(d.owned_to * 1000)), today(tz)) : ''}
@@ -98,10 +116,10 @@ function WatchCard({ d, tz, serverSyncs }: { d: Device; tz: string; serverSyncs:
   return (
     <li className="card card-hover relative flex flex-col gap-4 p-5">
       <div className="flex items-center gap-4">
-        <WatchGlyph battery={d.battery} size={76} />
+        <DeviceGlyph d={d} size={76} />
         <div className="min-w-0 flex-1">
           <Link to={`/devices/watches/${d.id}`} className="after:absolute after:inset-0 after:content-['']">
-            <h2 className="m-0 truncate font-display text-[24px] uppercase leading-tight tracking-[.02em]">{watchName(d)}</h2>
+            <h2 className="m-0 truncate font-display text-[24px] uppercase leading-tight tracking-[.02em]">{deviceName(d)}</h2>
           </Link>
           <p className="m-0 truncate font-mono text-[11px] uppercase tracking-[.12em] text-faint">{subtitle(d)}</p>
           {d.battery_at && <p className="m-0 mt-1 text-[12px] text-muted">battery read {ago(d.battery_at)}</p>}
@@ -129,6 +147,31 @@ function WatchCard({ d, tz, serverSyncs }: { d: Device; tz: string; serverSyncs:
           </button>
         </div>
       )}
+    </li>
+  )
+}
+
+/** DeviceCard is a device that is no watch: a scale, a sensor, … Its data comes from imports. */
+function DeviceCard({ d }: { d: Device }) {
+  const line = syncLine(d)
+  return (
+    <li className="card card-hover relative flex flex-col gap-4 p-5">
+      <div className="flex items-center gap-4">
+        <DeviceGlyph d={d} size={76} />
+        <div className="min-w-0 flex-1">
+          <Link to={`/devices/watches/${d.id}`} className="after:absolute after:inset-0 after:content-['']">
+            <h2 className="m-0 truncate font-display text-[24px] uppercase leading-tight tracking-[.02em]">{deviceName(d)}</h2>
+          </Link>
+          <p className="m-0 truncate font-mono text-[11px] uppercase tracking-[.12em] text-faint">{kindWord(d.kind)} · {subtitle(d)}</p>
+        </div>
+      </div>
+      <div>
+        <p className="m-0 flex items-center gap-2 text-[14px]">
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${toneDot[line.tone]}`} />
+          {line.text}
+        </p>
+        {line.detail && <p className="m-0 mt-1 text-[12px] text-muted">{line.detail}</p>}
+      </div>
     </li>
   )
 }

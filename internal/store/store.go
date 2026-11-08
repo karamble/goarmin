@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/karamble/goarmin/pkg/garmin/product"
 	"github.com/karamble/goarmin/pkg/sqlitex"
 )
 
@@ -21,6 +23,13 @@ import (
 type Store struct {
 	db  *sqlitex.DB
 	now func() time.Time
+
+	// zones caches each account's time-zone history as committed (Zone); every write that
+	// changes it stores the new one or drops it. zgen counts the changes, so a load that raced
+	// with one is not cached.
+	zmu   sync.Mutex
+	zones map[int64]Zone
+	zgen  map[int64]uint64
 }
 
 // Open opens and migrates the database at path.
@@ -33,7 +42,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, now: time.Now}, nil
+	s := &Store{db: db, now: time.Now, zones: map[int64]Zone{}, zgen: map[int64]uint64{}}
+	if err := s.classifyDevices(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 // SetClock replaces the clock (tests).
@@ -127,6 +141,8 @@ type Device struct {
 	// there ('' until a USB import learns it).
 	USBAuto   bool
 	USBSerial string
+	// Kind is what sort of device it is (product.Kind): a scale is no watch.
+	Kind product.Kind
 
 	// Set by UserDevice(s), seen from that user: Current says the watch is theirs now;
 	// OwnedFrom and OwnedTo (0 = still) are their latest period with it, in Unix seconds.
@@ -150,13 +166,83 @@ func (s *Store) EnsureDevice(ctx context.Context, d Device) (Device, error) {
 			product = CASE WHEN excluded.product != 0 THEN excluded.product ELSE product END,
 			name = CASE WHEN excluded.name != '' THEN excluded.name ELSE name END,
 			firmware = CASE WHEN excluded.firmware != '' THEN excluded.firmware ELSE firmware END,
-			address = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END`,
+			address = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
+			kind = CASE WHEN (excluded.product != 0 AND excluded.product != product) OR (excluded.address != '' AND kind != 'watch')
+				THEN '' ELSE kind END`,
 		d.UnitID, d.Product, d.Name, d.Firmware, strings.ToUpper(d.Address), s.now().Unix())
 	if err != nil {
 		return Device{}, err
 	}
-	return s.DeviceByUnit(ctx, d.UnitID)
+	out, err := s.DeviceByUnit(ctx, d.UnitID)
+	if err == nil && out.Kind == "" {
+		// New, or its product or address changed: classify it.
+		if out.Kind, err = s.classify(ctx, out); err == nil {
+			_, err = s.db.W.ExecContext(ctx, `UPDATE devices SET kind = ? WHERE id = ?`, out.Kind, out.ID)
+		}
+	}
+	return out, err
 }
+
+// classify decides what sort of device d is: a watch if it was paired over Bluetooth (only
+// watches are), else by its product; a product neither table names is told by its files (only
+// weigh-ins: a scale; health files: a watch).
+func (s *Store) classify(ctx context.Context, d Device) (product.Kind, error) {
+	if d.Address != "" {
+		return product.Watch, nil
+	}
+	if k := product.KindOf(d.Product); k != product.Other {
+		return k, nil
+	}
+	var weight, health, all int
+	err := s.db.W.QueryRowContext(ctx, `SELECT COALESCE(SUM(fit_type = 9), 0), COALESCE(SUM(fit_type IN (32, 44, 49, 68, 72)), 0), COUNT(*)
+		FROM raw_files WHERE device_id = ?`, d.ID).Scan(&weight, &health, &all)
+	switch {
+	case err != nil:
+		return "", err
+	case health > 0:
+		return product.Watch, nil
+	case all > 0 && weight == all:
+		return product.Scale, nil
+	}
+	return product.Other, nil
+}
+
+// classifyDevices classifies the devices not classified yet, and looks again at those that
+// were not told apart (their files may say more now).
+func (s *Store) classifyDevices(ctx context.Context) error {
+	rows, err := s.db.W.QueryContext(ctx, `SELECT `+deviceCols+` FROM devices d WHERE d.kind IN ('', 'other')`)
+	if err != nil {
+		return err
+	}
+	var list []Device
+	for rows.Next() {
+		d, err := scanDevice(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		list = append(list, d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, d := range list {
+		k, err := s.classify(ctx, d)
+		if err != nil {
+			return err
+		}
+		if k != d.Kind {
+			if _, err := s.db.W.ExecContext(ctx, `UPDATE devices SET kind = ? WHERE id = ?`, k, d.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ClassifyDevices looks again at devices that could not be told apart (after an import).
+func (s *Store) ClassifyDevices(ctx context.Context) error { return s.classifyDevices(ctx) }
 
 // DeviceByUnit looks a device up by its unit number.
 func (s *Store) DeviceByUnit(ctx context.Context, unit uint32) (Device, error) {
@@ -187,11 +273,11 @@ func (s *Store) HadOtherOwner(ctx context.Context, device, user int64) (bool, er
 
 // deviceCols are a device's columns in scanDevice order.
 const deviceCols = `d.id, d.unit_id, d.product, d.name, d.firmware, d.address, d.after_fetch, d.nickname,
-	COALESCE(d.battery, -1), COALESCE(d.battery_at, 0), d.paused, d.delete_support, d.usb_auto, d.usb_serial`
+	COALESCE(d.battery, -1), COALESCE(d.battery_at, 0), d.paused, d.delete_support, d.usb_auto, d.usb_serial, d.kind`
 
 func deviceDest(d *Device, batteryAt *int64) []any {
 	return []any{&d.ID, &d.UnitID, &d.Product, &d.Name, &d.Firmware, &d.Address, &d.AfterFetch, &d.Nickname,
-		&d.Battery, batteryAt, &d.Paused, &d.DeleteSupport, &d.USBAuto, &d.USBSerial}
+		&d.Battery, batteryAt, &d.Paused, &d.DeleteSupport, &d.USBAuto, &d.USBSerial, &d.Kind}
 }
 
 func scanDevice(row interface{ Scan(...any) error }, extra ...any) (Device, error) {

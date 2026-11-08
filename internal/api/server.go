@@ -204,6 +204,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sync-runs", s.needUser(s.syncLog))
 	mux.HandleFunc("GET /api/bluetooth", s.needUser(s.bluetooth))
 	mux.HandleFunc("POST /api/bluetooth/power", s.needUser(s.bluetoothPower))
+	s.routesReaders(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "no such API route") })
 }
 

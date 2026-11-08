@@ -225,3 +225,38 @@ func TestNotAWatchFile(t *testing.T) {
 		t.Fatalf("activity file: %v", err)
 	}
 }
+
+// TestDeviceFiles: gear, the settings change log (the changed field in words), solar charge, and
+// the messages of a settings file no table reads, kept as a document.
+func TestDeviceFiles(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	ts := proto.Uint32(fittest.FITTime(now.Add(-time.Hour)))
+	gear, err := Decode(fittest.Build(FileGear, serial, now,
+		fittest.Message(526, fittest.F{Num: 0, Value: proto.String("a1b2")}, fittest.F{Num: 2, Value: proto.String("Trail shoes")},
+			fittest.F{Num: 3, Value: proto.String("Brand")}, fittest.F{Num: 1, Value: proto.Uint8(1)})))
+	if err != nil || len(gear.Gear) != 1 || gear.Gear[0].Name != "Trail shoes" || gear.Gear[0].UUID != "a1b2" || gear.Gear[0].Type != 1 {
+		t.Fatalf("gear %+v %v", gear, err)
+	}
+	log, err := Decode(fittest.Build(FileChangelog, serial, now,
+		fittest.Message(217, fittest.F{Num: 253, Value: ts}, fittest.F{Num: 0, Value: proto.Uint16(0)}, fittest.F{Num: 2, Value: proto.Uint8(0)},
+			fittest.F{Num: 4, Value: proto.Uint32(4)})))
+	if err != nil || len(log.Changes) != 1 {
+		t.Fatalf("change log %+v %v", log, err)
+	}
+	if c := log.Changes[0]; c.Message != "file_id" || c.Field != "type" || c.Value != "activity" || !c.At.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("change %+v", c)
+	}
+	solar, err := Decode(fittest.Build(FileDeviceData, serial, now,
+		fittest.Message(318, fittest.F{Num: 253, Value: ts}, fittest.F{Num: 0, Value: proto.Uint16(4250)}, fittest.F{Num: 3, Value: proto.Uint32(60000)})))
+	if err != nil || len(solar.Solar) != 1 || solar.Solar[0].Percent != 42.5 || solar.Solar[0].GainMS != 60000 {
+		t.Fatalf("solar %+v %v", solar, err)
+	}
+	set, err := Decode(fittest.Build(typedef.FileSettings, serial, now,
+		fittest.Message(222, fittest.F{Num: 0, Value: proto.Uint16(390)}, fittest.F{Num: 1, Value: proto.Uint8(1)})))
+	if err != nil || len(set.Doc["alarm_settings"]) != 1 {
+		t.Fatalf("settings document %+v %v", set.Doc, err)
+	}
+	if _, ok := set.Doc["file_id"]; ok {
+		t.Fatal("the document holds what Decode reads itself")
+	}
+}

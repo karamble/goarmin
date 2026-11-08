@@ -11,7 +11,7 @@ const sec = (d: number) => Math.floor((now + d) / 1000)
 
 function dev(sync: Partial<SyncStatus> | null, over: Partial<Device> = {}): Device {
   return {
-    id: 1, unit_id: 7, product: 4536, model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: '', firmware: '23.40',
+    id: 1, unit_id: 7, product: 4536, kind: 'watch', model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: '', firmware: '23.40',
     address: 'C0:FF:EE:12:34:56', after_fetch: 'keep', paused: false, usb_auto: true, delete_support: '', battery: null,
     current: true, owned_from: 0, owned_to: null,
     sync: sync === null ? undefined : { address: 'A0', running: false, live: false, last_ok: false, pulled: 0, imported: 0,
@@ -26,6 +26,8 @@ describe('device lines', () => {
     expect(watchName(dev(null, { nickname: 'Daily' }))).toBe('Daily')
     expect(fitTypeName(4)).toBe('Activity')
     expect(fitTypeName(999)).toBe('Type 999')
+    expect(fitTypeName(73)).toBe('Skin temperature')
+    expect(fitTypeName(61)).toBe('ECG')
     expect(subtitle(dev(null))).toBe('fenix 8 - 47mm')
     expect(subtitle(dev(null, { nickname: 'Daily' }))).toBe('Fenix 8 · fenix 8 - 47mm')
     expect(subtitle(dev(null, { name: '', model: 'Instinct 2' }))).toBe('Unit 7')

@@ -18,6 +18,7 @@ import (
 
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/fitid"
+	"github.com/karamble/goarmin/pkg/garmin/product"
 	"github.com/karamble/goarmin/pkg/zipwalk"
 )
 
@@ -48,11 +49,37 @@ type Report struct {
 	Other    int   `json:"other"`
 	Archives int   `json:"archives"` // zip archives opened (set by the caller)
 	Bytes    int64 `json:"bytes"`    // read
+	// Read counts every file the import has dealt with so far, of whatever kind; Found how many
+	// it knows of (set by the caller, 0 if it cannot tell: a zip's nested archives add theirs
+	// when they are opened); Current is the path being read while it runs.
+	Read    int    `json:"read"`
+	Found   int    `json:"found,omitempty"`
+	Current string `json:"current,omitempty"`
 	// Errors are the first maxErrors problems, ErrorsMore how many more there were.
 	Errors     []string `json:"errors,omitempty"`
 	ErrorsMore int      `json:"errors_more,omitempty"`
 	// Watches counts the FIT files per watch (device id) that made them.
 	Watches map[int64]int `json:"-"`
+
+	t *touched // the days the import touched, rebuilt at its end
+}
+
+func (r *Report) touched() *touched {
+	if r.t == nil {
+		r.t = newTouched()
+	}
+	return r.t
+}
+
+// finish rebuilds the days the import touched and classifies the devices its files told
+// apart (a device first seen with this import's files).
+func (in *Ingester) finish(ctx context.Context, rep *Report) error {
+	ctx = context.WithoutCancel(ctx)
+	err := in.Store.ClassifyDevices(ctx)
+	if rep.t == nil {
+		return err
+	}
+	return errors.Join(err, in.rebuild(ctx, rep.t))
 }
 
 const maxErrors = 200
@@ -72,12 +99,21 @@ func (r *Report) addError(msg string) {
 func (in *Ingester) Import(ctx context.Context, user store.User, source string, paths []string) (Report, error) {
 	zw := &zipwalk.Walker{}
 	rep, err := in.ImportFrom(ctx, user, Paths(paths, zw), ImportOptions{Source: source})
-	rep.Archives = zw.Archives
+	rep.Archives = zw.Archives()
 	return rep, err
 }
 
-// ErrHandedOver is an import's error for a watch that was handed over and not added again.
-var ErrHandedOver = errors.New("this watch was handed over; add it under Devices › Add a watch first")
+// ErrHandedOver is an import's error for a device that was handed over and not added again.
+var ErrHandedOver = errors.New("handed over")
+
+// handedOver says so for d in words: a watch is added again under Devices, anything else
+// simply by its next owner's import.
+func handedOver(d store.Device) error {
+	if d.Kind == product.Watch || d.Kind == "" {
+		return fmt.Errorf("this watch was %w; add it under Devices › Add a watch first", ErrHandedOver)
+	}
+	return fmt.Errorf("this %s was %w to another account", d.Kind.Words(), ErrHandedOver)
+}
 
 func (in *Ingester) importFile(ctx context.Context, user store.User, source, path string, rep *Report) error {
 	b, err := readFile(path)
@@ -91,9 +127,14 @@ func (in *Ingester) importFile(ctx context.Context, user store.User, source, pat
 // importBytes stores and ingests one FIT file for user, into the account that owned its watch
 // when it was recorded. It returns the file's digest.
 func (in *Ingester) importBytes(ctx context.Context, user store.User, source, name string, b []byte, rep *Report) (string, error) {
-	info, ierr := fitid.Inspect(b)
+	return in.importPrepared(ctx, user, source, name, prepare(b), rep)
+}
+
+// importPrepared is importBytes with the file read and decoded already.
+func (in *Ingester) importPrepared(ctx context.Context, user store.User, source, name string, p *prepared, rep *Report) (string, error) {
+	info := p.info
 	var dev int64
-	if ierr == nil && isWatchFile(info) {
+	if p.ierr == nil && isWatchFile(info) {
 		d, err := in.Store.EnsureDevice(ctx, store.Device{UnitID: info.SerialNumber, Product: info.Product})
 		if err != nil {
 			return "", err
@@ -104,14 +145,14 @@ func (in *Ingester) importBytes(ctx context.Context, user store.User, source, na
 		if errors.Is(err, store.ErrNotFound) {
 			owner, err = in.Store.AssignIfUnowned(ctx, d.ID, user.ID)
 			if errors.Is(err, store.ErrNotFound) {
-				return "", ErrHandedOver
+				return "", handedOver(d)
 			}
 		}
 		if err != nil {
 			return "", err
 		}
 		if owner != user.ID {
-			return "", fmt.Errorf("the watch %d belonged to another account when this was recorded", info.SerialNumber)
+			return "", fmt.Errorf("the %s %d belonged to another account when this was recorded", d.Kind.Words(), info.SerialNumber)
 		}
 		dev = d.ID
 		if rep.Watches == nil {
@@ -119,7 +160,7 @@ func (in *Ingester) importBytes(ctx context.Context, user store.User, source, na
 		}
 		rep.Watches[dev]++
 	}
-	return in.store(ctx, user, dev, source, name, b, info, ierr, rep)
+	return in.store(ctx, user, dev, source, name, p, rep)
 }
 
 // ImportWatch stores and ingests the files a sync left in dir (a watch's spool), each into the
@@ -176,7 +217,7 @@ func (in *Ingester) ImportWatch(ctx context.Context, dev store.Device, source, d
 			}
 			users[owner] = u
 		}
-		if _, err := in.store(ctx, u, dev.ID, source, filepath.Base(p), b, info, ierr, &rep); err != nil {
+		if _, err := in.store(ctx, u, dev.ID, source, filepath.Base(p), &prepared{b: b, info: info, ierr: ierr}, &rep); err != nil {
 			return fail(err)
 		}
 		if err := os.Remove(p); err != nil {
@@ -184,18 +225,19 @@ func (in *Ingester) ImportWatch(ctx context.Context, dev store.Device, source, d
 		}
 		return nil
 	})
-	return rep, err
+	return rep, errors.Join(err, in.finish(ctx, &rep))
 }
 
-// store records one file's bytes for user (linked to device, if not 0) and ingests it.
-func (in *Ingester) store(ctx context.Context, user store.User, device int64, source, name string, b []byte,
-	info fitid.Info, infoErr error, rep *Report) (string, error) {
-	sum, err := in.Blobs.PutBytes(b)
+// store records one file's bytes for user (linked to device, if not 0) and ingests it; p.dec,
+// if set, is what it holds already.
+func (in *Ingester) store(ctx context.Context, user store.User, device int64, source, name string, p *prepared, rep *Report) (string, error) {
+	info := p.info
+	sum, err := in.Blobs.PutBytes(p.b)
 	if err != nil {
 		return "", err
 	}
-	f := store.RawFile{SHA256: sum, Size: int64(len(b)), UserID: user.ID, DeviceID: device, Source: source, SourceName: name}
-	if infoErr != nil {
+	f := store.RawFile{SHA256: sum, Size: int64(len(p.b)), UserID: user.ID, DeviceID: device, Source: source, SourceName: name}
+	if p.ierr != nil {
 		rep.Invalid++ // stored as it is, but nothing to ingest
 	} else {
 		f.FIT = &store.FITIdentity{Type: uint8(info.Type), Manufacturer: uint16(info.Manufacturer), Product: info.Product,
@@ -220,10 +262,13 @@ func (in *Ingester) store(ctx context.Context, user store.User, device int64, so
 	if rf.FIT == nil {
 		return sum, nil
 	}
-	if err := in.File(ctx, rf.ID); err != nil {
+	if err := in.ingest(ctx, rf, p.dec, rep.touched()); err != nil {
 		return sum, err
 	}
 	rep.Ingested++
+	if err := in.rebuildDue(ctx, rep.touched()); err != nil {
+		return sum, err
+	}
 	return sum, nil
 }
 

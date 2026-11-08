@@ -16,7 +16,7 @@ describe('routes', () => {
   it('hides the sync-only and admin-only parts', () => {
     const plain = visibleSections(me())
     expect(plain.find((s) => s.id === 'live')).toBeUndefined()
-    expect(plain.find((s) => s.id === 'devices')?.pages.map((p) => p.path)).toEqual(['watches', 'log', 'import'])
+    expect(plain.find((s) => s.id === 'devices')?.pages.map((p) => p.path)).toEqual(['watches', 'log', 'import', 'files'])
     expect(plain.find((s) => s.id === 'settings')?.pages.map((p) => p.path)).not.toContain('admin')
     const full = visibleSections(me({ is_admin: true, server: { version: 'dev', sync: true, tiles: true } }))
     expect(full.find((s) => s.id === 'live')).toBeDefined()
@@ -35,7 +35,7 @@ describe('routes', () => {
     const mod = await add!.load()
     expect(mod.default.name).toBe('AddWatch')
     const withSync = visibleSections(me({ server: { version: 'dev', sync: true, tiles: false } }))
-    expect(withSync.find((s) => s.id === 'devices')?.pages.filter((p) => !p.hidden).map((p) => p.path)).toEqual(['watches', 'log', 'import'])
+    expect(withSync.find((s) => s.id === 'devices')?.pages.filter((p) => !p.hidden).map((p) => p.path)).toEqual(['watches', 'log', 'import', 'files'])
   })
   it('has unique ids and paths', () => {
     expect(new Set(sections.map((s) => s.id)).size).toBe(sections.length)

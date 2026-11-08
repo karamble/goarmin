@@ -10,7 +10,7 @@ import { useMe } from '../../api/hooks/auth'
 import { useDeleteFromWatch, useDevice, useDeviceFiles, useDeviceSummary, useSyncLog, useSyncNow, useUpdateDevice } from '../../api/hooks/devices'
 import type { AfterFetch, Device, WatchFile } from '../../api/types'
 import { HeaderActions, useSectionTitle } from '../../app/section/HeaderSlot'
-import { fitTypeName, subtitle, syncLine, toneDot, watchName } from '../../lib/devices'
+import { deviceName, fitTypeName, isWatch, kindWord, subtitle, syncLine, toneDot } from '../../lib/devices'
 import { ago, bytes, int, timeOfDay } from '../../lib/format'
 import { relDay, today } from '../../lib/period'
 import { Notice, Skeleton } from '../../ui/kit'
@@ -18,23 +18,26 @@ import { Confirm } from '../../ui/Sheet'
 import { useToast } from '../../ui/Toast'
 import { FromWatch } from './FromWatch'
 import { Remove } from './Remove'
+import { ChangesCard, DocumentsCard, SolarCard } from './WatchExtras'
+import { DeviceGlyph } from './DeviceGlyph'
 import { fold, RunRow } from './RunRow'
-import { WatchGlyph } from './WatchGlyph'
 
 type Tab = 'overview' | 'files' | 'settings' | 'remove'
 
-/** Watch is one watch: what it is doing, what came from it, its files and its settings. */
+/** Watch is one device: what it is doing, what came from it, and for a watch its files and settings
+ * (a scale or another device only imports: its name, what came from it, removing it). */
 export default function Watch() {
   const id = Number(useParams().id)
   const me = useMe().data!
   const { device: d, isPending } = useDevice(id)
   const [q, setQ] = useSearchParams()
-  useSectionTitle(d ? watchName(d) : undefined)
+  useSectionTitle(d ? deviceName(d) : undefined)
   const sync = useSyncNow()
   const toast = useToast()
+  const watch = !d || isWatch(d)
   const tabs: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
-    { id: 'files', label: 'Files' },
+    ...(watch ? [{ id: 'files' as Tab, label: 'Files' }] : []),
     ...(d?.current ? [{ id: 'settings' as Tab, label: 'Settings' }] : []),
     { id: 'remove', label: 'Remove' },
   ]
@@ -43,8 +46,8 @@ export default function Watch() {
   if (!d) {
     return (
       <div className="card px-6 py-10 text-center">
-        <p className="m-0 text-muted">No such watch.</p>
-        <Link to="/devices/watches" className="mt-3 inline-block text-lime">Back to your watches</Link>
+        <p className="m-0 text-muted">No such device.</p>
+        <Link to="/devices/watches" className="mt-3 inline-block text-lime">Back to your devices</Link>
       </div>
     )
   }
@@ -68,16 +71,16 @@ export default function Watch() {
         )}
       </HeaderActions>
       <Link to="/devices/watches" className="inline-flex w-fit items-center gap-1.5 text-[13px] text-muted hover:text-text">
-        <ArrowLeft size={14} /> All watches
+        <ArrowLeft size={14} /> All devices
       </Link>
       {!d.current && (
         <Notice>
-          You handed this watch over{d.owned_to ? ` ${relDay(today(me.timezone, new Date(d.owned_to * 1000)), today(me.timezone))}` : ''}.
+          You handed this {kindWord(d.kind)} over{d.owned_to ? ` ${relDay(today(me.timezone, new Date(d.owned_to * 1000)), today(me.timezone))}` : ''}.
           You still see what came from it while it was yours.
         </Notice>
       )}
       <Hero d={d} tz={me.timezone} serverSyncs={me.server.sync} />
-      <nav aria-label="Watch" className="flex gap-1 border-b border-border">
+      <nav aria-label={kindWord(d.kind, true)} className="flex gap-1 border-b border-border">
         {tabs.map((t) => (
           <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined}
             onClick={() => setQ((p) => { const n = new URLSearchParams(p); n.set('tab', t.id); return n }, { replace: true })}
@@ -88,8 +91,9 @@ export default function Watch() {
         ))}
       </nav>
       {tab === 'overview' && <Overview d={d} tz={me.timezone} />}
+      {tab === 'overview' && isWatch(d) && <SolarCard d={d} tz={me.timezone} />}
       {tab === 'files' && <Files d={d} tz={me.timezone} />}
-      {tab === 'settings' && d.current && <Settings d={d} />}
+      {tab === 'settings' && d.current && (watch ? <Settings d={d} /> : <NameSettings d={d} />)}
       {tab === 'remove' && <Remove d={d} serverSyncs={me.server.sync} />}
     </div>
   )
@@ -100,7 +104,7 @@ function Hero({ d, tz, serverSyncs }: { d: Device; tz: string; serverSyncs: bool
   const s = d.sync
   return (
     <section className="card flex flex-wrap items-center gap-6 p-5 sm:p-6">
-      <WatchGlyph battery={d.battery} size={104} />
+      <DeviceGlyph d={d} size={104} />
       <div className="min-w-0 flex-1">
         <p className="m-0 font-mono text-[11px] uppercase tracking-[.14em] text-faint">{subtitle(d)}</p>
         <p className="m-0 mt-2 flex items-center gap-2 text-[18px]">
@@ -115,7 +119,8 @@ function Hero({ d, tz, serverSyncs }: { d: Device; tz: string; serverSyncs: bool
           </div>
         )}
         <dl className="m-0 mt-4 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
-          <Fact label="Battery">{d.battery == null ? 'not reported yet' : `${d.battery} %${d.battery_at ? ` · ${ago(d.battery_at)}` : ''}`}</Fact>
+          {isWatch(d) && <Fact label="Battery">{d.battery == null ? 'not reported yet' : `${d.battery} %${d.battery_at ? ` · ${ago(d.battery_at)}` : ''}`}</Fact>}
+          {!isWatch(d) && <Fact label="Kind">{kindWord(d.kind, true)}</Fact>}
           {s?.last_good && <Fact label="Last good sync">{ago(s.last_good)}</Fact>}
           <Fact label="Firmware">{d.firmware || '–'}</Fact>
           {d.address && <Fact label="Address"><span className="break-all font-mono">{d.address}</span></Fact>}
@@ -144,9 +149,9 @@ function Overview({ d, tz }: { d: Device; tz: string }) {
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
       <section className="card p-5">
-        <h2 className="caps m-0 mb-4">What came from this watch</h2>
+        <h2 className="caps m-0 mb-4">What came from this {kindWord(d.kind)}</h2>
         {!s ? <Skeleton className="h-24" /> : s.files === 0 ? (
-          <p className="m-0 text-[14px] text-muted">Nothing yet. Its first sync brings it in.</p>
+          <p className="m-0 text-[14px] text-muted">{isWatch(d) ? 'Nothing yet. Its first sync brings it in.' : 'Nothing yet. Its files come with an import.'}</p>
         ) : (
           <>
             <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
@@ -170,18 +175,33 @@ function Overview({ d, tz }: { d: Device; tz: string }) {
           </>
         )}
       </section>
+      {isWatch(d) ? (
       <section className="card p-5">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="caps m-0">Recent syncs</h2>
-          <Link to={`/devices/log?watch=${d.id}`} className="text-[13px] text-lime hover:underline">Sync log</Link>
-        </div>
-        {log.isPending ? <Skeleton className="h-24" /> : runs.length === 0 ? (
-          <p className="m-0 text-[14px] text-muted">No syncs yet.</p>
-        ) : (
-          <ul className="m-0 list-none p-0">{fold(runs).map((e) => <RunRow key={e.run.id} entry={e} tz={tz} />)}</ul>
-        )}
-      </section>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="caps m-0">Recent syncs</h2>
+            <Link to={`/devices/log?watch=${d.id}`} className="text-[13px] text-lime hover:underline">Sync log</Link>
+          </div>
+          {log.isPending ? <Skeleton className="h-24" /> : runs.length === 0 ? (
+            <p className="m-0 text-[14px] text-muted">No syncs yet.</p>
+          ) : (
+            <ul className="m-0 list-none p-0">{fold(runs).map((e) => <RunRow key={e.run.id} entry={e} tz={tz} />)}</ul>
+          )}
+        </section>
+      ) : <HowItArrives d={d} />}
     </div>
+  )
+}
+
+/** HowItArrives says where a device that is no watch gets its data from. */
+function HowItArrives({ d }: { d: Device }) {
+  const line = syncLine(d)
+  return (
+    <section className="card p-5">
+      <h2 className="caps m-0 mb-2">How its data arrives</h2>
+      <p className="m-0 text-[14px] text-text">{line.text}</p>
+      {line.detail && <p className="m-0 mt-1 text-[13px] text-muted">{line.detail}</p>}
+      <Link to="/devices/import" className="mt-3 inline-block text-[13px] text-lime hover:underline">Import files</Link>
+    </section>
   )
 }
 
@@ -265,6 +285,7 @@ function Files({ d, tz }: { d: Device; tz: string }) {
             </span>
             <span className="hidden w-[150px] shrink-0 text-[12px] text-faint sm:block">{stateText[f.state]}</span>
             <span className="num w-[64px] shrink-0 text-right text-[12px] text-muted">{bytes(f.size)}</span>
+            {f.file_id ? <Link to={`/devices/files/${f.file_id}`} className="shrink-0 text-[12px] text-lime hover:underline">Inspect</Link> : <span className="w-[42px] shrink-0" />}
           </li>
         ))}
       </ul>
@@ -292,7 +313,32 @@ const afterFetch: { value: AfterFetch; title: string; text: string }[] = [
   { value: 'archive_delete', title: 'Mark as synced and delete activities', text: 'Also deletes activities from the watch once goarmin has them.' },
 ]
 
+/** NameSettings is what a device that is no watch can set: its name. */
+function NameSettings({ d }: { d: Device }) {
+  const up = useUpdateDevice(d.id)
+  const toast = useToast()
+  const [name, setName] = useState(d.nickname)
+  return (
+    <section className="card p-5">
+      <h2 className="caps m-0 mb-3">Name</h2>
+      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => {
+        e.preventDefault()
+        up.mutate({ nickname: name }, { onSuccess: () => toast({ text: 'Saved' }), onError: (err) => toast({ tone: 'error', text: errorText(err) }) })
+      }}>
+        <label className="field-label min-w-[240px] flex-1">
+          What you call it
+          <input className="field font-sans text-[15px] normal-case tracking-normal text-text" value={name} maxLength={60}
+            placeholder={d.model} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <button type="submit" disabled={name === d.nickname || up.isPending}
+          className="rounded-full border border-border px-4 py-2.5 text-[14px] hover:border-lime hover:text-lime disabled:opacity-40">Save</button>
+      </form>
+    </section>
+  )
+}
+
 function Settings({ d }: { d: Device }) {
+  const tz = useMe().data!.timezone
   const up = useUpdateDevice(d.id)
   const toast = useToast()
   const [name, setName] = useState(d.nickname)
@@ -353,6 +399,8 @@ function Settings({ d }: { d: Device }) {
         </button>
       </section>
       <FromWatch d={d} />
+      <ChangesCard d={d} tz={tz} />
+      <DocumentsCard d={d} />
       <section className="card p-5">
         <h2 className="caps m-0">Coming later</h2>
         <ul className="m-0 mt-2 grid gap-1 pl-5 text-[13px] text-muted">

@@ -10,10 +10,17 @@ import { timeOfDay } from '../../lib/format'
 import { hrvOf, rolling } from '../../lib/health'
 import { addDays } from '../../lib/period'
 import { byDay, Card, ChartCard, dayClick, Empty, Kpis, Loaded, nightsByDay, num, rangeDays, useHealth, withLead } from './parts'
+import { HealthStatusCard } from './extras'
 
 export default function HrvPage() {
   const { p } = useHealth()
-  return p.period === 'day' ? <HrvDay /> : <HrvRange />
+  const range = p.period === 'day' ? { from: p.day, to: p.day } : p.range
+  return (
+    <div className="grid gap-5">
+      {p.period === 'day' ? <HrvDay /> : <HrvRange />}
+      <HealthStatusCard from={range.from} to={range.to} />
+    </div>
+  )
 }
 
 /** Band shows last night's value on a scale with the balanced range marked. */

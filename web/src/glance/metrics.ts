@@ -33,6 +33,18 @@ export const dailyMetrics: DailyMetric[] = [
   { key: 'respiration', label: 'Respiration', unit: fixed('brpm'), digits: 1, get: (d) => d.respiration_avg },
   { key: 'readiness', label: 'Training readiness', unit: fixed(''), digits: 0, get: (d) => d.values.training_readiness },
   { key: 'vo2max', label: 'VO2 max', unit: fixed('ml/kg/min'), digits: 1, get: (d) => d.values.vo2max },
+  { key: 'weight', label: 'Weight', unit: (u) => (u === 'imperial' ? 'lb' : 'kg'), digits: 1,
+    get: (d, u) => (d.values.weight == null ? null : d.values.weight * (u === 'imperial' ? 2.20462 : 1)) },
+  { key: 'body_fat', label: 'Body fat', unit: fixed('%'), digits: 1, get: (d) => d.values.body_fat },
+  { key: 'skin_temp', label: 'Skin temperature', unit: fixed('°C'), digits: 1, get: (d) => d.values.skin_temp_deviation },
+  { key: 'hydration', label: 'Hydration', unit: fixed('ml'), digits: 0, get: (d) => d.values.hydration },
+  { key: 'fitness_age', label: 'Fitness age', unit: fixed('years'), digits: 0, get: (d) => d.values.fitness_age },
+  { key: 'acute_load', label: 'Acute load', unit: fixed(''), digits: 0, get: (d) => d.values.acute_load },
+  { key: 'acwr', label: 'Acute:chronic ratio', unit: fixed(''), digits: 2, get: (d) => d.values.acwr },
+  { key: 'recovery', label: 'Recovery time', unit: fixed('h'), digits: 0, get: (d) => (d.values.recovery_time == null ? null : d.values.recovery_time / 60) },
+  { key: 'endurance', label: 'Endurance score', unit: fixed(''), digits: 0, get: (d) => d.values.endurance_score },
+  { key: 'heat', label: 'Heat acclimation', unit: fixed('%'), digits: 0, get: (d) => d.values.heat_acclimation },
+  { key: 'lthr', label: 'Lactate threshold', unit: fixed('bpm'), digits: 0, get: (d) => d.values.lactate_threshold_hr },
 ]
 
 export const metricByKey = new Map(dailyMetrics.map((m) => [m.key, m]))

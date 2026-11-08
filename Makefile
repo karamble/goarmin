@@ -46,10 +46,14 @@ export GOARMIN_TILE_URL GOARMIN_TILE_TOKEN GOARMIN_TILE_DARK GOARMIN_TILE_ATTRIB
 # Bluetooth bond with the watch lives in BlueZ (/var/lib/bluetooth), not in DATA.
 LISTEN     ?= $(or $(GOARMIN_LISTEN),127.0.0.1:8642)
 DATA       ?= $(or $(GOARMIN_DATA_DIR),$(or $(XDG_DATA_HOME),$(HOME)/.local/share)/goarmin)
+# A Gadgetbridge clone, read by make fitprofile (the community's description of FIT).
+GADGETBRIDGE ?= $(HOME)/go/src/codeberg.org/Freeyourgadget/Gadgetbridge
 SERVE_ARGS ?= -with-sync
 STATE_DIR  ?= $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/goarmin
 URL        := http://localhost:$(lastword $(subst :, ,$(LISTEN)))
 SQLITE     ?= sqlite3
+# GNU time (not the shell keyword): wall time and peak memory for make bench-import.
+TIME       ?= /usr/bin/time
 DB         := $(DATA)/goarmin.db
 SERVER     := LISTEN="$(LISTEN)" STATE_DIR="$(STATE_DIR)" scripts/server.sh
 START      := ./$(BIN) -data "$(DATA)" $(SERVE_ARGS)
@@ -196,6 +200,16 @@ activities: build-go ## Show the newest 20 activities (EMAIL=… for another acc
 db-shell: ## Open the database read-only in sqlite3
 	$(SQLITE) -header -column "file:$(DB)?mode=ro"
 
+.PHONY: bench-import
+bench-import: build-go ## Time an import on a throwaway copy of the data: make bench-import FILE=export.zip (the data is not touched)
+	@test -n "$(FILE)" || { echo "usage: make bench-import FILE=path/to/export.zip [EMAIL=…]"; exit 2; }
+	@test -x "$(TIME)" || { echo "GNU time is missing at $(TIME): install it (Arch: pacman -S time), see make check-tools"; exit 1; }
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	echo "$(BLUE)Copying the data to $$tmp$(NC) (deleted afterwards)"; \
+	$(SQLITE) "file:$(DB)?mode=ro" ".backup '$$tmp/goarmin.db'" && cp -r "$(DATA)/raw" "$$tmp/" 2>/dev/null; \
+	$(TIME) -f "$(GREEN)wall %e s, user %U s, system %S s, peak memory %M KB$(NC)" \
+		./$(BIN) import -data "$$tmp" -user "$(EMAIL)" -source gc_export "$(FILE)" | grep -v '@'
+
 # ============================================
 # Build
 # ============================================
@@ -258,10 +272,23 @@ fuzz: ## Run the fuzz targets for 30 s each
 	$(GO) test -run='^$$' -fuzz=FuzzDatasets -fuzztime=30s ./pkg/mtp
 	$(GO) test -run='^$$' -fuzz=FuzzSession -fuzztime=30s ./pkg/mtp
 
+.PHONY: fitprofile
+fitprofile: ## Regenerate pkg/fitprofile (FIT messages, fields, file types, devices) from the FIT profile and Gadgetbridge's (GADGETBRIDGE=…)
+	$(GO) run ./tools/fitprofilegen -gadgetbridge "$(GADGETBRIDGE)"
+
 # ============================================
 # Dependencies
 # ============================================
 ##@ Dependencies
+
+.PHONY: check-tools
+check-tools: ## Check the tools goarmin needs on this machine (go, node, npm, sqlite3, GNU time)
+	@ok=1; for t in go node npm $(SQLITE) $(TIME); do \
+		if command -v "$$t" >/dev/null 2>&1; then printf "  $(GREEN)ok$(NC)       %s\n" "$$t"; \
+		else printf "  $(RED)missing$(NC)  %s\n" "$$t"; ok=0; fi; done; \
+	if [ -x "$(TIME)" ] && ! $(TIME) --version >/dev/null 2>&1; then echo "  $(RED)$(TIME) is not GNU time$(NC)"; ok=0; fi; \
+	if [ ! -x "$(TIME)" ]; then echo "  install GNU time (Arch: pacman -S time)"; fi; \
+	[ $$ok = 1 ] || exit 1
 
 .PHONY: web-deps
 web-deps: ## Install the dashboard's dependencies, fetching what the cache lacks (browser UA)

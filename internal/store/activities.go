@@ -31,9 +31,19 @@ func nullNeg(v int) any {
 	return v
 }
 
+// fitActivitySummary is FIT file type 20: an activity's summary without its track (another
+// watch's activity, or one the watch summarises).
+const fitActivitySummary = 20
+
 // writeActivities replaces the activities file contributed. An activity keeps its id when its
-// file is ingested again, so links to it stay valid.
-func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactivity.Activity, z Zone, days map[string]bool) error {
+// file is ingested again, so links to it stay valid. An activity summary (FIT 20) adds a session
+// only where no activity file has it: the activity file, with its track, always wins.
+func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactivity.Activity, z Zone, days map[string]bool, fresh bool) error {
+	summary := f.FIT != nil && f.FIT.Type == fitActivitySummary
+	guard := ""
+	if summary {
+		guard = ` WHERE (SELECT fit_type FROM raw_files WHERE id = activities.raw_file_id) = 20`
+	}
 	keep := []any{f.ID}
 	marks := ""
 	for _, a := range acts {
@@ -56,7 +66,7 @@ func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactiv
 				ascent_m = excluded.ascent_m, descent_m = excluded.descent_m, training_effect = excluded.training_effect,
 				anaerobic_effect = excluded.anaerobic_effect, training_load = excluded.training_load,
 				min_lat = excluded.min_lat, min_lon = excluded.min_lon, max_lat = excluded.max_lat, max_lon = excluded.max_lon,
-				polyline = excluded.polyline`,
+				polyline = excluded.polyline`+guard,
 			f.UserID, f.ID, a.Index, start, a.End.Unix(), day, a.Sport, a.SubSport, a.Name, nullNaN(a.Elapsed), nullNaN(a.Timer),
 			nullNaN(a.Distance), nullNeg(a.Calories), nullNeg(a.AvgHR), nullNeg(a.MaxHR), nullNaN(a.AvgSpeed), nullNaN(a.MaxSpeed),
 			nullNeg(a.AvgCadence), nullNeg(a.AvgPower), nullNeg(a.Ascent), nullNeg(a.Descent), nullNaN(a.TrainingEffect),
@@ -64,12 +74,28 @@ func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactiv
 		if err != nil {
 			return err
 		}
-		var id int64
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM activities WHERE user_id = ? AND start_ts = ? AND session_index = ?`,
-			f.UserID, start, a.Index).Scan(&id); err != nil {
+		var id, owner int64
+		if err := tx.QueryRowContext(ctx, `SELECT id, raw_file_id FROM activities WHERE user_id = ? AND start_ts = ? AND session_index = ?`,
+			f.UserID, start, a.Index).Scan(&id, &owner); err != nil {
 			return err
 		}
+		if owner != f.ID {
+			continue // a summary of an activity stored from its own file
+		}
 		keep = append(keep, id)
+		if !summary {
+			// An activity the export made of this session (its start a second off) steps
+			// aside; what only Garmin Connect knows about it stays, on this one.
+			if _, err := tx.ExecContext(ctx, `UPDATE activities SET extra = COALESCE((SELECT j.extra FROM activities j
+				JOIN raw_files r ON r.id = j.raw_file_id WHERE j.user_id = ? AND j.id != ? AND r.fit_type IS NULL
+				AND j.start_ts BETWEEN ? AND ?), extra) WHERE id = ? AND extra = '{}'`, f.UserID, id, start-60, start+60, id); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM activities WHERE user_id = ? AND id != ? AND start_ts BETWEEN ? AND ?
+				AND raw_file_id IN (SELECT id FROM raw_files WHERE user_id = ? AND fit_type IS NULL)`, f.UserID, id, start-60, start+60, f.UserID); err != nil {
+				return err
+			}
+		}
 		marks += ", ?"
 		for _, q := range []string{`DELETE FROM laps WHERE activity_id = ?`, `DELETE FROM activity_streams WHERE activity_id = ?`,
 			`DELETE FROM time_in_zone WHERE activity_id = ?`} {
@@ -115,6 +141,9 @@ func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactiv
 				return err
 			}
 		}
+	}
+	if fresh {
+		return nil // it contributed nothing before
 	}
 	// Whatever this file contributed before and no longer does.
 	_, err := tx.ExecContext(ctx, `DELETE FROM activities WHERE raw_file_id = ? AND id NOT IN (0`+marks+`)`, keep...)
@@ -165,18 +194,22 @@ type ActivitySummary struct {
 	TrainingLoad                    *float64
 	MinLat, MinLon, MaxLat, MaxLon  *float64
 	Polyline                        string
+	// Extra is what only Garmin Connect knows about it (from an export): JSON.
+	Extra json.RawMessage
 }
 
 const activityCols = `id, raw_file_id, start_ts, end_ts, day, sport, sub_sport, name, elapsed_s, timer_s, distance_m, kcal,
 	avg_hr, max_hr, avg_speed, max_speed, avg_cadence, avg_power, ascent_m, descent_m, training_effect, anaerobic_effect,
-	training_load, min_lat, min_lon, max_lat, max_lon, polyline`
+	training_load, min_lat, min_lon, max_lat, max_lon, polyline, extra`
 
 func scanActivity(row interface{ Scan(...any) error }) (ActivitySummary, error) {
 	var a ActivitySummary
+	var extra string
 	err := row.Scan(&a.ID, &a.RawFileID, &a.Start, &a.End, &a.Day, &a.Sport, &a.SubSport, &a.Name, &a.Elapsed, &a.Timer,
 		&a.Distance, &a.Kcal, &a.AvgHR, &a.MaxHR, &a.AvgSpeed, &a.MaxSpeed, &a.AvgCadence, &a.AvgPower, &a.Ascent,
 		&a.Descent, &a.TrainingEffect, &a.AnaerobicEffect, &a.TrainingLoad, &a.MinLat, &a.MinLon, &a.MaxLat, &a.MaxLon,
-		&a.Polyline)
+		&a.Polyline, &extra)
+	a.Extra = json.RawMessage(extra)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound
 	}

@@ -34,7 +34,7 @@ const identified = { unit: 3912345678, product: 4536, model: 'Fenix 8', name: 'f
 
 function device(over: Partial<Device> = {}): Device {
   return {
-    id: 7, unit_id: 3912345678, product: 4536, model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: 'Trail', firmware: '23.40',
+    id: 7, unit_id: 3912345678, product: 4536, kind: 'watch', model: 'Fenix 8', name: 'fenix 8 - 47mm', nickname: 'Trail', firmware: '23.40',
     address: fenix.address, after_fetch: 'archive', paused: false, usb_auto: true, delete_support: '', battery: 91, battery_at: now, current: true,
     owned_from: 0, owned_to: null, paired: true,
     sync: { address: fenix.address, running: true, live: false, last_ok: false, pulled: 0, imported: 0, failures: 0, away: false,

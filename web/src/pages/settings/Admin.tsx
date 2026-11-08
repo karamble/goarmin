@@ -10,6 +10,7 @@ import { useMe } from '../../api/hooks/auth'
 import { useAdminWatchAction, useAdminWatches } from '../../api/hooks/devices'
 import { useAdminPairing, useEndPairing } from '../../api/hooks/pairing'
 import type { AdminWatch } from '../../api/types'
+import { kindWord } from '../../lib/devices'
 import { ago, timeOfDay } from '../../lib/format'
 import { Link } from 'react-router-dom'
 import { Button, Card, Field, Notice, Spinner } from '../../ui/kit'
@@ -87,8 +88,8 @@ function AdminWatches() {
   const p = pairing.data
   return (
     <Card className="p-6 sm:p-8 lg:col-span-2">
-      <p className="caps mb-1">Watches on this server</p>
-      <p className="mt-0 mb-5 text-sm text-muted">Who owns which watch. Releasing one ends its owner's time with it; their data stays theirs.</p>
+      <p className="caps mb-1">Devices on this server</p>
+      <p className="mt-0 mb-5 text-sm text-muted">Who owns which device. Releasing one ends its owner's time with it; their data stays theirs.</p>
       {p && (
         <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-lime-dim bg-lime-fill px-4 py-3 text-[14px]">
           <span className="flex-1">
@@ -117,16 +118,17 @@ function AdminWatches() {
           </Link>
         </div>
       )}
-      {q.isPending ? <Spinner /> : (q.data ?? []).length === 0 ? <p className="m-0 text-sm text-muted">No watches yet.</p> : (
+      {q.isPending ? <Spinner /> : (q.data ?? []).length === 0 ? <p className="m-0 text-sm text-muted">No devices yet.</p> : (
         <ul className="m-0 grid list-none gap-2 p-0">
           {q.data!.map((w) => (
             <li key={w.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-bg2 px-4 py-3">
               <div className="min-w-[180px] flex-1">
-                <p className="m-0">{w.model}{w.name && w.name.toLowerCase() !== w.model.toLowerCase() ? <span className="text-faint"> · {w.name}</span> : ''}</p>
+                <p className="m-0">{w.model}{w.name && w.name.toLowerCase() !== w.model.toLowerCase() ? <span className="text-faint"> · {w.name}</span> : ''}
+                  {w.kind && w.kind !== 'watch' && <span className="text-faint"> · {kindWord(w.kind)}</span>}</p>
                 <p className="m-0 text-[13px] text-faint">{w.owner ? (w.owner.name || w.owner.email) : 'Nobody: waiting to be added'}</p>
               </div>
               <span className="text-[12px] text-muted">
-                {w.paired ? 'paired here' : 'not paired here'}{w.last_end ? ` · last sync ${ago(w.last_end)}` : ''}
+                {w.kind && w.kind !== 'watch' ? 'from imports' : w.paired ? 'paired here' : 'not paired here'}{w.last_end ? ` · last sync ${ago(w.last_end)}` : ''}
               </span>
               <div className="flex gap-2">
                 {w.owner && (

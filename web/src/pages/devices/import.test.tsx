@@ -107,6 +107,25 @@ describe('Import', () => {
     expect(await screen.findByText('Importing GARMIN (2 files)')).toBeTruthy()
   })
 
+  it('shows a running export live: how far, what so far, what it reads', async () => {
+    const writes = api([], [run({ id: 8, source: 'gc_export', name: 'export.zip', status: 'running', started_at: now - 65, finished_at: null,
+      report: { export: true, read: 1200, found: 12281, seen: 1100, new: 950, known: 150, kept: 100, bytes: 9_500_000,
+        current: 'export.zip/DI_CONNECT/DI-Connect-Uploaded-Files/UploadedFiles_0-_Part1.zip/x_1.fit' } })])
+    renderWith(<Page><ImportPage /></Page>, { me: fixtureMe() })
+    const panel = await screen.findByRole('region', { name: /Import export.zip in progress/ })
+    expect(within(panel).getByText('Importing the Garmin Connect export')).toBeTruthy()
+    expect(within(panel).getByText('1,200')).toBeTruthy()
+    expect(within(panel).getByText('of 12,281')).toBeTruthy()
+    expect(within(panel).getByText('950')).toBeTruthy()
+    expect(within(panel).getByText('9 %')).toBeTruthy()
+    expect(within(panel).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('9')
+    expect(within(panel).getByText(/UploadedFiles_0-_Part1\.zip\/x_1\.fit/)).toBeTruthy()
+    expect(within(panel).getByText(/files\/s/)).toBeTruthy()
+    expect(within(panel).getByText(/^1 min/)).toBeTruthy()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(writes).toEqual([{ method: 'DELETE', path: '/api/imports/8', body: undefined }]))
+  })
+
   it('lists imports with what an export kept and what went wrong', async () => {
     const writes = api([], [
       run({ id: 7, status: 'running', finished_at: null, report: { seen: 40, new: 10, kept: 5 } }),

@@ -108,5 +108,8 @@ func (s *Store) UpdateProfile(ctx context.Context, user int64, p Profile) error 
 		return nil
 	}
 	_, err := s.db.W.ExecContext(ctx, `UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id = ?`, append(args, user)...)
+	if p.Timezone != nil {
+		s.setZone(user, Zone{}, false) // the zone's fallback location
+	}
 	return err
 }

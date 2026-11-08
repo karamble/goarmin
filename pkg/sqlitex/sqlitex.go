@@ -7,6 +7,8 @@
 //   - one writer connection, so SQLite never reports "database is locked";
 //   - a separate pool of read-only connections for queries;
 //   - WAL, a busy timeout, foreign keys and synchronous=NORMAL;
+//   - a large page cache for the writer (big imports insert millions of rows at scattered
+//     places of large indexes), temporary tables in memory;
 //   - append-only migrations recorded in schema_version.
 package sqlitex
 
@@ -34,6 +36,8 @@ type Options struct {
 	Readers int
 	// BusyTimeoutMS is how long a connection waits for a lock (10000).
 	BusyTimeoutMS int
+	// WriterCacheMB is the writer's page cache (128 MiB); readers keep SQLite's default.
+	WriterCacheMB int
 }
 
 // Open opens or creates the database file at path.
@@ -43,6 +47,9 @@ func Open(path string, opt Options) (*DB, error) {
 	}
 	if opt.BusyTimeoutMS <= 0 {
 		opt.BusyTimeoutMS = 10000
+	}
+	if opt.WriterCacheMB <= 0 {
+		opt.WriterCacheMB = 128
 	}
 	if strings.ContainsAny(path, "?#") {
 		return nil, errors.New("sqlitex: the path must not contain ? or #")
@@ -61,8 +68,13 @@ func Open(path string, opt Options) (*DB, error) {
 	} {
 		q.Add("_pragma", p)
 	}
-	dsn := "file:" + path + "?" + q.Encode()
-	w, err := sql.Open("sqlite", dsn)
+	wq := url.Values{}
+	for k, v := range q {
+		wq[k] = append([]string(nil), v...)
+	}
+	wq.Add("_pragma", fmt.Sprintf("cache_size(%d)", -opt.WriterCacheMB*1024)) // negative: KiB
+	wq.Add("_pragma", "temp_store(MEMORY)")
+	w, err := sql.Open("sqlite", "file:"+path+"?"+wq.Encode())
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"cmp"
 	"errors"
+	"math"
 	"slices"
 	"time"
 
@@ -64,6 +65,16 @@ type Sleep struct {
 	BodyBatteryStart, BodyBatteryEnd                  int
 	// Seconds per stage.
 	Deep, Light, REM, Awake, Unmeasurable int
+	// Stages: built from the night's stage records (a sleep file), so the stage samples of the
+	// night are there too; else a summary (the daily-health or metrics file, an export).
+	Stages bool
+}
+
+// Nap is a nap the watch recorded (FIT nap_event).
+type Nap struct {
+	Start, End time.Time
+	Feedback   int // nap_period_feedback, Unknown if absent
+	Source     int // nap_source: 0 automatic, 1 manual, … (Unknown if absent)
 }
 
 // HRVNight is the watch's HRV status after a night, in ms (Unknown when absent).
@@ -86,6 +97,51 @@ type Suggestion struct {
 	AerobicTE, AnaerobicTE float64 // estimated training effect
 }
 
+// WeighIn is one weighing (a scale's weight file). Unknown marks what the scale did not measure.
+type WeighIn struct {
+	At                                  time.Time
+	Weight                              float64 // kg
+	Fat, Hydration                      float64 // %
+	Bone, Muscle, VisceralFat           float64 // kg
+	BMI                                 float64 // kg/m²
+	BMR, ActiveMR                       int     // kcal/day
+	MetabolicAge, VisceralRating, Build int     // years; the scale's ratings
+}
+
+// SkinTempNight is the watch's overnight skin temperature (°C, Unknown when absent).
+type SkinTempNight struct {
+	At                              time.Time
+	Day                             string // local date
+	Nightly, Deviation, Deviation7d float64
+	CalibratedDays                  int
+}
+
+// ECG is one ECG recording: its summary and its samples (µV, as the watch gives them).
+type ECG struct {
+	Start               time.Time
+	Class               int     // ecg_rhythm_classification
+	Side                int     // the wrist it was taken on (FIT side), Unknown if absent
+	AvgHR               float64 // bpm
+	RMSSD               int     // ms, Unknown if absent
+	Seconds             int
+	RawRate, SmoothRate float64 // samples per second
+	Raw, Smooth         []float32
+}
+
+// Physio is the watch's physiological metrics as of a moment (after an activity, or from its
+// backup of them): Unknown where it gives none.
+type Physio struct {
+	At                                      time.Time
+	Sport, SubSport                         int
+	VO2Max                                  float64 // ml/kg/min
+	LTHR, LTPower, MaxHR, AvgHR             int     // bpm, W
+	LTSpeed                                 float64 // km/h
+	RecoveryMin                             int
+	AerobicTE, AnaerobicTE                  float64
+	Duration, Distance                      float64 // s, m
+	Race5K, Race10K, RaceHalf, RaceMarathon int     // s
+}
+
 // Data is everything extracted from one file.
 type Data struct {
 	Suggestions []Suggestion
@@ -93,7 +149,12 @@ type Data struct {
 	Offsets     []Offset
 	Daily       []Daily
 	Sleep       []Sleep
+	Naps        []Nap
 	HRV         []HRVNight
+	WeighIns    []WeighIn
+	SkinTemp    []SkinTempNight
+	ECG         []ECG
+	Physio      []Physio
 	// Messages counts every message number in the file, known or not.
 	Messages map[uint16]int
 }
@@ -121,8 +182,24 @@ func (d *Data) Span() (from, to time.Time) {
 		add(s.Start)
 		add(s.End)
 	}
+	for _, n := range d.Naps {
+		add(n.Start)
+		add(n.End)
+	}
 	for _, s := range d.HRV {
 		add(s.At)
+	}
+	for _, w := range d.WeighIns {
+		add(w.At)
+	}
+	for _, n := range d.SkinTemp {
+		add(n.At)
+	}
+	for _, e := range d.ECG {
+		add(e.Start)
+	}
+	for _, p := range d.Physio {
+		add(p.At)
 	}
 	return from, to
 }
@@ -137,7 +214,6 @@ const (
 	mMetricsTime       = 241
 	mSpO2              = 269
 	mSleepLevel        = 275
-	mEndOfFile         = 276
 	mMonitoringAlt     = 279
 	mRespiration       = 297
 	mRacePrediction    = 339
@@ -153,11 +229,33 @@ const (
 	mHRMinimum         = 431
 	mUserMetrics       = 79
 	mSleepDemand       = 410
+	mEvent             = 21
 	mWorkout           = 26
 	mWorkoutSchedule   = 428
 	mHRVStats          = 401
+	mNapEvent          = 412
+	mWeightScale       = 30
+	mPhysiological     = 140
+	mMaxMetData        = 229
+	mAcclimatization   = 281
+	mDailyAltitude     = 282
+	mMetricRecovery    = 284
+	mECGSummary        = 336
+	mECGRaw            = 337
+	mECGSmooth         = 338
+	mFunctionalMetrics = 356
+	mTrueUpRecovery    = 357
+	mSkinTempRaw       = 397
+	mSkinTempOvernight = 398
+	mMaxHR             = 430
+	mDisruptionPeriod  = 470
+	mDisruptionNight   = 471
+	mSleepInsight      = 521
 	fTimestamp         = 253
 )
+
+// eventSleep is FIT event 74 (sleep): type 0 when the watch saw sleep begin, 1 when it ended.
+const eventSleep = 74
 
 // ErrNotFIT is returned for bytes that are not a FIT file.
 var ErrNotFIT = errors.New("wellness: not a FIT file")
@@ -192,11 +290,15 @@ type extractor struct {
 	// just before them wrapped 18 hours into the future.
 	lastMon int64
 
-	stages     []Sample // sleep stages, for a sleep session built from them
-	endOfFile  int64
-	assessment *Sleep
-	summaries  []Sleep              // SLEEP_SUMMARY records, merged into DAILY_SLEEP in finish
-	workouts   map[int64]Suggestion // WORKOUT by workout_index, for the schedule
+	stages []Sample // sleep_level records: each closes the stage interval since the record before
+	// sleepStart is the night's start a sleep file states (UTC FIT seconds, 0 if it states
+	// none): the first stage interval runs from it to the first record. sleep_insight states it
+	// on newer watches; the sleep event's start (event 74, type start) on all, the same second.
+	sleepStart, sleepEvent int64
+	assessment             *Sleep
+	ecg                    *ECG                 // the recording being read: its samples follow its summary
+	summaries              []Sleep              // SLEEP_SUMMARY records, merged into DAILY_SLEEP in finish
+	workouts               map[int64]Suggestion // WORKOUT by workout_index, for the schedule
 }
 
 // text returns string field n of m ("" if absent).
@@ -263,6 +365,8 @@ func slice(m *proto.Message, n byte) (vals []int64, idx []int) {
 
 func intValue(v proto.Value) (int64, bool) {
 	switch v.Type() {
+	case proto.TypeBool: // a profile field of type bool (typedef.Bool: 0, 1, 0xFF invalid)
+		return int64(v.Bool()), true
 	case proto.TypeInt8:
 		return int64(v.Int8()), true
 	case proto.TypeUint8:
@@ -281,6 +385,61 @@ func intValue(v proto.Value) (int64, bool) {
 		return int64(v.Uint64()), true
 	}
 	return 0, false
+}
+
+// float returns field n of m as a number (float fields included), if present and valid.
+func float(m *proto.Message, n byte) (float64, bool) {
+	for i := range m.Fields {
+		f := &m.Fields[i]
+		if f.Num != n || f.IsExpandedField {
+			continue
+		}
+		if !f.Value.Valid(f.BaseType) {
+			return 0, false
+		}
+		switch f.Value.Type() {
+		case proto.TypeFloat32:
+			return float64(f.Value.Float32()), true
+		case proto.TypeFloat64:
+			return f.Value.Float64(), true
+		}
+		v, ok := intValue(f.Value)
+		return float64(v), ok
+	}
+	return 0, false
+}
+
+// floats returns the valid float32 values of field n (one value or an array).
+func floats(m *proto.Message, n byte) []float32 {
+	for i := range m.Fields {
+		f := &m.Fields[i]
+		if f.Num != n || f.IsExpandedField {
+			continue
+		}
+		switch f.Value.Type() {
+		case proto.TypeFloat32:
+			if f.Value.Valid(f.BaseType) {
+				return []float32{f.Value.Float32()}
+			}
+		case proto.TypeSliceFloat32:
+			var out []float32
+			for _, v := range f.Value.SliceFloat32() {
+				if !math.IsNaN(float64(v)) && math.Float32bits(v) != 0xFFFFFFFF {
+					out = append(out, v)
+				}
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+// scaled returns field n divided by scale, or Unknown.
+func scaled(m *proto.Message, n byte, scale float64) float64 {
+	if v, ok := float(m, n); ok {
+		return v / scale
+	}
+	return Unknown
 }
 
 // orUnknown returns field n as an int, or Unknown.
@@ -362,15 +521,137 @@ func (x *extractor) message(m *proto.Message) {
 			x.sample(Altitude, ts, 0, v*20) // raw is 1/5 m
 		}
 	case mSleepLevel:
+		// A record marks the END of a stage: the level since the previous record (checked on
+		// the Fenix 8: read so, a night's records sum exactly to the daily-health file's stage
+		// minutes). The samples are written in sleepFromStages, at each interval's start.
 		if v, ok := field(m, 0); ok && hasTS {
-			s := Sample{Kind: SleepStage, At: FITTime(ts), Value: v}
-			x.d.Samples = append(x.d.Samples, s)
-			x.stages = append(x.stages, s)
+			x.stages = append(x.stages, Sample{Kind: SleepStage, At: FITTime(ts), Value: v})
 		}
-	case mEndOfFile:
-		if hasTS {
-			x.endOfFile = ts
+	case mSleepInsight:
+		// The night's bounds. The community profile calls them local times, but they are UTC:
+		// on the Fenix 8 the end is the last stage record to the second. The offsets (minutes)
+		// give the local time.
+		at := func(t, o byte) int64 {
+			v, ok := field(m, t)
+			if !ok || v <= 0 {
+				return 0
+			}
+			if off, ok := field(m, o); ok {
+				x.offset(v, v+off*60)
+			}
+			return v
 		}
+		x.sleepStart = at(3, 4)
+		at(5, 6) // the end: the last stage record; only its offset is kept
+	case mEvent:
+		if ev, _ := field(m, 0); ev == eventSleep && hasTS {
+			if typ, ok := field(m, 1); ok && typ == 0 {
+				x.sleepEvent = ts
+			}
+		}
+	case mWeightScale:
+		x.weighIn(m, ts, hasTS)
+	case mSkinTempRaw:
+		if v, ok := float(m, 1); ok && hasTS && math.Abs(v) < 20 {
+			x.sample(SkinTemp, ts, 0, int64(math.Round(v*100)))
+		}
+	case mSkinTempOvernight:
+		if !hasTS {
+			return
+		}
+		n := SkinTempNight{At: FITTime(ts), Nightly: scaled(m, 4, 1), Deviation: scaled(m, 1, 1), Deviation7d: scaled(m, 2, 1),
+			CalibratedDays: orUnknown(m, 3)}
+		local, _ := field(m, 0)
+		if local > 0 {
+			n.Day = FITTime(local).Format(time.DateOnly)
+		}
+		x.d.SkinTemp = append(x.d.SkinTemp, n)
+		if n.Deviation != Unknown {
+			x.daily(SkinTempDeviation, ts, local, int64(math.Round(n.Deviation*100)))
+		}
+	case mDisruptionPeriod:
+		if v, ok := field(m, 0); ok && hasTS {
+			x.sample(Disruption, ts, 0, v)
+		}
+	case mDisruptionNight:
+		if v, ok := field(m, 0); ok && hasTS {
+			x.daily(DisruptionNight, ts, 0, v)
+		}
+	case mECGSummary:
+		x.ecgSummary(m)
+	case mECGRaw:
+		if x.ecg != nil {
+			x.ecg.Raw = append(x.ecg.Raw, floats(m, 0)...)
+		}
+	case mECGSmooth:
+		if x.ecg != nil {
+			x.ecg.Smooth = append(x.ecg.Smooth, floats(m, 0)...)
+		}
+	case mPhysiological:
+		x.physio(m, ts, hasTS)
+	case mMaxMetData:
+		at, ok := field(m, 0)
+		if !ok {
+			at, ok = ts, hasTS
+		}
+		if !ok {
+			return
+		}
+		if v, ok := field(m, 2); ok && v > 0 {
+			x.daily(VO2Max, at, 0, v*10) // the field is ×10, the kind ×100
+		}
+		if v, ok := field(m, 3); ok && v > 0 {
+			x.daily(FitnessAge, at, 0, v)
+		}
+	case mAcclimatization:
+		if v, ok := field(m, 4); ok && hasTS && v > 0 {
+			x.daily(AltitudeAcclim, ts, 0, v)
+		}
+	case mDailyAltitude:
+		if v, ok := float(m, 1); ok && hasTS {
+			x.daily(DailyAltitude, ts, 0, int64(math.Round(v/65536)))
+		}
+	case mMetricRecovery:
+		if v, ok := field(m, 0); ok {
+			at, ok2 := field(m, 1)
+			if !ok2 {
+				at, ok2 = ts, hasTS
+			}
+			if ok2 {
+				x.daily(RecoveryTime, at, 0, v)
+			}
+		}
+	case mTrueUpRecovery:
+		if v, ok := field(m, 2); ok && hasTS {
+			x.daily(RecoveryTime, ts, 0, v)
+		}
+	case mFunctionalMetrics:
+		if !hasTS {
+			return
+		}
+		if v, ok := field(m, 4); ok && v > 0 {
+			x.daily(FTP, ts, 0, v)
+		}
+		if v, ok := field(m, 7); ok && v > 0 {
+			x.daily(RunningLTPower, ts, 0, v)
+		}
+		if v, ok := field(m, 8); ok && v > 0 {
+			x.daily(LactateThreshold, ts, 0, v)
+		}
+	case mMaxHR:
+		if v, ok := field(m, 7); ok && hasTS && v > 0 {
+			x.daily(MaxHR, ts, 0, v)
+		}
+	case mNapEvent:
+		start, ok1 := field(m, 0)
+		end, ok2 := field(m, 2)
+		if del, _ := field(m, 5); !ok1 || !ok2 || end <= start || del == 1 {
+			return
+		}
+		if v, ok := field(m, 1); ok {
+			x.offset(start, start+v*60)
+		}
+		x.d.Naps = append(x.d.Naps, Nap{Start: FITTime(start), End: FITTime(end), Feedback: orUnknown(m, 4), Source: orUnknown(m, 6)})
 	case mSleepAssessment:
 		x.assessment = &Sleep{
 			Score: orUnknown(m, 6), QualityScore: orUnknown(m, 7), DurationScore: orUnknown(m, 4),
@@ -506,6 +787,71 @@ func (x *extractor) message(m *proto.Message) {
 				}
 			}
 		}
+	}
+}
+
+// weighIn handles WEIGHT_SCALE: one weighing.
+func (x *extractor) weighIn(m *proto.Message, ts int64, hasTS bool) {
+	kg, ok := float(m, 0)
+	if !hasTS || !ok || kg <= 0 || kg >= 0xFFFE {
+		return
+	}
+	w := WeighIn{At: FITTime(ts), Weight: kg / 100, Fat: scaled(m, 1, 100), Hydration: scaled(m, 2, 100),
+		VisceralFat: scaled(m, 3, 100), Bone: scaled(m, 4, 100), Muscle: scaled(m, 5, 100), BMI: scaled(m, 13, 10),
+		BMR: Unknown, ActiveMR: Unknown, MetabolicAge: orUnknown(m, 10), VisceralRating: orUnknown(m, 11), Build: orUnknown(m, 8)}
+	if v, ok := float(m, 7); ok {
+		w.BMR = int(math.Round(v / 4))
+	}
+	if v, ok := float(m, 9); ok {
+		w.ActiveMR = int(math.Round(v / 4))
+	}
+	x.d.WeighIns = append(x.d.WeighIns, w)
+	x.daily(Weight, ts, 0, int64(math.Round(w.Weight*1000)))
+	if w.Fat != Unknown {
+		x.daily(BodyFat, ts, 0, int64(math.Round(w.Fat*100)))
+	}
+	if w.BMI != Unknown {
+		x.daily(BMI, ts, 0, int64(math.Round(w.BMI*10)))
+	}
+}
+
+// ecgSummary handles ECG_SUMMARY: a recording starts; its samples follow.
+func (x *extractor) ecgSummary(m *proto.Message) {
+	at, ok := field(m, 4)
+	if !ok {
+		at, ok = field(m, fTimestamp)
+	}
+	if !ok {
+		x.ecg = nil
+		return
+	}
+	e := ECG{Start: FITTime(at), Class: orUnknown(m, 1), Side: orUnknown(m, 6), AvgHR: scaled(m, 7, 1), RMSSD: orUnknown(m, 12),
+		Seconds: orUnknown(m, 11), RawRate: scaled(m, 2, 1), SmoothRate: scaled(m, 3, 1)}
+	x.d.ECG = append(x.d.ECG, e)
+	x.ecg = &x.d.ECG[len(x.d.ECG)-1]
+}
+
+// physio handles PHYSIOLOGICAL_METRICS: the watch's view after an activity (or its backup).
+func (x *extractor) physio(m *proto.Message, ts int64, hasTS bool) {
+	if !hasTS {
+		return
+	}
+	p := Physio{At: FITTime(ts), Sport: orUnknown(m, 11), SubSport: orUnknown(m, 12), VO2Max: scaled(m, 7, 18724.571428571428),
+		LTHR: orUnknown(m, 14), LTPower: orUnknown(m, 15), LTSpeed: scaled(m, 16, 10), MaxHR: orUnknown(m, 53), AvgHR: orUnknown(m, 63),
+		RecoveryMin: orUnknown(m, 9), AerobicTE: scaled(m, 4, 10), AnaerobicTE: scaled(m, 20, 10), Duration: scaled(m, 35, 1000),
+		Distance: scaled(m, 36, 100), Race5K: orUnknown(m, 69), Race10K: orUnknown(m, 70), RaceHalf: orUnknown(m, 71), RaceMarathon: orUnknown(m, 72)}
+	if p.MaxHR == Unknown {
+		p.MaxHR = orUnknown(m, 1) // new_hr_max
+	}
+	x.d.Physio = append(x.d.Physio, p)
+	if p.LTHR > 0 {
+		x.daily(LactateThreshold, ts, 0, int64(p.LTHR))
+	}
+	if p.MaxHR > 0 {
+		x.daily(MaxHR, ts, 0, int64(p.MaxHR))
+	}
+	if p.RecoveryMin > 0 {
+		x.daily(RecoveryTime, ts, 0, int64(p.RecoveryMin))
 	}
 }
 
@@ -648,28 +994,39 @@ func (x *extractor) finish() {
 		x.sleepFromStages()
 	}
 	slices.SortStableFunc(x.d.Sleep, func(a, b Sleep) int { return a.Start.Compare(b.Start) })
+	slices.SortStableFunc(x.d.Naps, func(a, b Nap) int { return a.Start.Compare(b.Start) })
 	slices.SortStableFunc(x.d.Offsets, func(a, b Offset) int { return a.At.Compare(b.At) })
 	x.d.Offsets = slices.CompactFunc(x.d.Offsets, func(a, b Offset) bool { return a.At.Equal(b.At) && a.Offset == b.Offset })
 }
 
+// sleepFromStages makes the night of a sleep file from its stage records. Each record closes an
+// interval: the first one the interval from the night's start (the file states it), each later
+// one the interval since the record before. The night ends at the last record. A file that
+// states no start loses its first interval (its length is unknown); the night then starts at
+// the first record, and a summary of the night from another file supplies its true start.
 func (x *extractor) sleepFromStages() {
 	st := slices.Clone(x.stages)
 	slices.SortStableFunc(st, func(a, b Sample) int { return cmp.Compare(a.At.Unix(), b.At.Unix()) })
-	end := st[len(st)-1].At.Add(time.Minute)
-	if x.endOfFile > 0 && FITTime(x.endOfFile).After(st[len(st)-1].At) {
-		end = FITTime(x.endOfFile)
+	start := st[0].At
+	for _, v := range []int64{x.sleepStart, x.sleepEvent} {
+		// A stated start, if it lies before the first record and within a night of it.
+		if t := FITTime(v); v > 0 && !t.After(start) && start.Sub(t) < 16*time.Hour {
+			start = t
+			break
+		}
 	}
-	s := Sleep{Start: st[0].At, End: end, Score: Unknown, QualityScore: Unknown, DurationScore: Unknown,
-		RecoveryScore: Unknown, MinHR: Unknown, BodyBatteryStart: Unknown, BodyBatteryEnd: Unknown}
+	s := Sleep{Start: start, End: st[len(st)-1].At, Score: Unknown, QualityScore: Unknown, DurationScore: Unknown,
+		RecoveryScore: Unknown, MinHR: Unknown, BodyBatteryStart: Unknown, BodyBatteryEnd: Unknown, Stages: true}
 	if a := x.assessment; a != nil {
 		s.Score, s.QualityScore, s.DurationScore, s.RecoveryScore = a.Score, a.QualityScore, a.DurationScore, a.RecoveryScore
 	}
-	for i, p := range st {
-		next := end
-		if i+1 < len(st) {
-			next = st[i+1].At
+	prev := start
+	for _, p := range st {
+		if !p.At.After(prev) {
+			continue // a record at the start (or a repeat) closes nothing
 		}
-		secs := int(next.Sub(p.At) / time.Second)
+		x.d.Samples = append(x.d.Samples, Sample{Kind: SleepStage, At: prev, Value: p.Value})
+		secs := int(p.At.Sub(prev) / time.Second)
 		switch p.Value {
 		case SleepDeep:
 			s.Deep += secs
@@ -682,13 +1039,15 @@ func (x *extractor) sleepFromStages() {
 		default:
 			s.Unmeasurable += secs
 		}
+		prev = p.At
+	}
+	if !s.End.After(s.Start) {
+		return // a single record: no interval, no night
 	}
 	if i := slices.IndexFunc(x.d.Sleep, func(d Sleep) bool { return sameNight(d, s) }); i >= 0 {
 		// The daily record already describes this night; add the stage totals.
 		d := &x.d.Sleep[i]
-		if d.Deep == Unknown {
-			d.Deep, d.Light, d.REM, d.Awake, d.Unmeasurable = s.Deep, s.Light, s.REM, s.Awake, s.Unmeasurable
-		}
+		d.Deep, d.Light, d.REM, d.Awake, d.Unmeasurable, d.Stages = s.Deep, s.Light, s.REM, s.Awake, s.Unmeasurable, true
 		return
 	}
 	x.d.Sleep = append(x.d.Sleep, s)

@@ -6,11 +6,17 @@ import { useActivitiesOn, useDailyRange, useDaySeries } from '../../api/hooks/da
 import { describeRangeBars, describeSeries, rangeBars, timeSeries } from '../../charts'
 import { timeOfDay } from '../../lib/format'
 import { rolling } from '../../lib/health'
+import { EcgCard } from './extras'
 import { byDay, ChartCard, dayClick, Empty, Kpis, Loaded, num, rangeDays, useHealth, withLead } from './parts'
 
 export default function HeartPage() {
-  const { p } = useHealth()
-  return p.period === 'day' ? <HeartDay /> : <HeartRange />
+  const { p, ctx } = useHealth()
+  return (
+    <div className="grid gap-5">
+      {p.period === 'day' ? <HeartDay /> : <HeartRange />}
+      <EcgCard tz={p.tz} ctx={ctx} />
+    </div>
+  )
 }
 
 function HeartDay() {

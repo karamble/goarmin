@@ -201,7 +201,9 @@ func (s *Store) DeviceSummary(ctx context.Context, user, device int64) (DeviceSu
 		user, device, user).Scan(&sum.Activities); err != nil {
 		return sum, err
 	}
-	if err := s.db.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM sleep_sessions WHERE user_id = ? AND raw_file_id IN (`+files+`)`,
+	if err := s.db.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM sleep_sessions s WHERE s.user_id = ? AND EXISTS (
+		SELECT 1 FROM sleep_parts p WHERE p.raw_file_id IN (`+files+`) AND p.user_id = s.user_id
+			AND p.start_ts < s.end_ts AND p.end_ts > s.start_ts)`,
 		user, device, user).Scan(&sum.Nights); err != nil {
 		return sum, err
 	}
@@ -209,7 +211,9 @@ func (s *Store) DeviceSummary(ctx context.Context, user, device int64) (DeviceSu
 	// were recorded on, in the watch's own time zone.
 	days := map[string]bool{}
 	rows, err = s.db.R.QueryContext(ctx, `SELECT day FROM daily_values WHERE user_id = ? AND raw_file_id IN (`+files+`)
-		UNION SELECT day FROM sleep_sessions WHERE user_id = ? AND raw_file_id IN (`+files+`)`,
+		UNION SELECT s.day FROM sleep_sessions s WHERE s.user_id = ? AND EXISTS (
+			SELECT 1 FROM sleep_parts p WHERE p.raw_file_id IN (`+files+`) AND p.user_id = s.user_id
+				AND p.start_ts < s.end_ts AND p.end_ts > s.start_ts)`,
 		user, device, user, user, device, user)
 	if err != nil {
 		return sum, err
@@ -361,4 +365,55 @@ func (s *Store) RawFileCounts(ctx context.Context, user int64) (total, dups int,
 		}
 	}
 	return total, dups, byType, rows.Err()
+}
+
+// FileQuery narrows UserFiles.
+type FileQuery struct {
+	Device int64 // 0: any
+	Type   int   // FIT type; -1 any, -2 files that are not FIT
+	Before int64 // id keyset: files with a smaller id (0: from the newest)
+	Limit  int
+}
+
+// UserFiles lists user's raw files (copies of others left out), newest first.
+func (s *Store) UserFiles(ctx context.Context, user int64, q FileQuery) ([]RawFile, error) {
+	where, args := `user_id = ? AND duplicate_of IS NULL`, []any{user}
+	if q.Device != 0 {
+		where, args = where+` AND device_id = ?`, append(args, q.Device)
+	}
+	switch {
+	case q.Type == -2:
+		where += ` AND fit_type IS NULL`
+	case q.Type >= 0:
+		where, args = where+` AND fit_type = ?`, append(args, q.Type)
+	}
+	if q.Before > 0 {
+		where, args = where+` AND id < ?`, append(args, q.Before)
+	}
+	if q.Limit <= 0 {
+		q.Limit = 100
+	}
+	rows, err := s.db.R.QueryContext(ctx, `SELECT `+rawFileCols+` FROM raw_files WHERE `+where+` ORDER BY id DESC LIMIT ?`, append(args, q.Limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RawFile
+	for rows.Next() {
+		f, err := scanRawFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// UserFile returns one of user's raw files (ErrNotFound for anyone else's).
+func (s *Store) UserFile(ctx context.Context, user, id int64) (RawFile, error) {
+	f, err := scanRawFile(s.db.R.QueryRowContext(ctx, `SELECT `+rawFileCols+` FROM raw_files WHERE id = ? AND user_id = ?`, id, user))
+	if errors.Is(err, sql.ErrNoRows) {
+		return f, ErrNotFound
+	}
+	return f, err
 }

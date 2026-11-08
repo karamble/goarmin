@@ -16,6 +16,7 @@ import {
 import { droppedFiles, uploadFiles } from '../../lib/upload'
 import { Button, Notice, Skeleton, Spinner } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
+import { RunningImports } from './ImportProgress'
 
 /** Import brings files in outside a sync: a watch plugged in by USB, or files from this
  * computer (FIT files, a folder, zip archives, the Garmin Connect export). */
@@ -106,6 +107,7 @@ function USBSection() {
           ))}
         </ul>
       )}
+      <div className="mt-4 empty:hidden"><RunningImports kind="usb" /></div>
     </section>
   )
 }
@@ -203,13 +205,16 @@ function FilesSection() {
         </div>
       )}
       {error && <div className="mt-3"><Notice tone="error">{error}</Notice></div>}
+      <div className="mt-4 empty:hidden"><RunningImports kind="upload" /></div>
       <details className="mt-4 text-[13px] text-muted">
         <summary className="cursor-pointer text-text">The Garmin Connect export</summary>
         <p className="m-0 mt-2 max-w-3xl">
           Garmin Connect sends your whole account as a zip when you ask for it on Garmin’s website (Account › Data Management › Export
           your data); the link arrives by email, often after a few days. Drop that zip here as it is. Its activities and other FIT
-          files come in like any import, and watches you had before become watches of yours with their history. Its other files
-          (summaries, sleep, weight and more, as JSON) are kept unchanged for goarmin to read later.
+          files come in like any import, and devices you had before (watches, a scale) become devices of yours with their
+          history. goarmin also reads its other files: daily summaries, sleep, training metrics, weight, health status,
+          hydration, ECG, gear, personal records, and your account records (Settings › Account data). Every file is kept
+          unchanged as well.
         </p>
       </details>
     </section>

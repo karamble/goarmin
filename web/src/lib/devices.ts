@@ -2,26 +2,58 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import type { Device } from '../api/types'
+import type { Device, DeviceKind } from '../api/types'
 import { ago, timeOfDay } from './format'
+import { fitTypeTitles } from './fitTypes.gen'
 
-/** watchName is what the person calls the watch: their nickname, else the model. */
-export function watchName(d: Pick<Device, 'nickname' | 'model' | 'name'>): string {
-  return d.nickname || d.model || d.name || 'Watch'
+/** deviceName is what the person calls the device: their nickname, else the model. */
+export function deviceName(d: Pick<Device, 'nickname' | 'model' | 'name'> & { kind?: DeviceKind }): string {
+  return d.nickname || d.model || d.name || kindWord(d.kind ?? 'watch', true)
+}
+
+/** watchName is deviceName (most devices are watches). */
+export const watchName = deviceName
+
+/** isWatch: only a watch syncs over Bluetooth, streams live values and keeps files to fetch. */
+export function isWatch(d: Pick<Device, 'kind'>): boolean {
+  return (d.kind ?? 'watch') === 'watch'
+}
+
+const kindWords: Record<DeviceKind, [string, string]> = {
+  watch: ['watch', 'Watches'],
+  scale: ['scale', 'Scales'],
+  bike_computer: ['bike computer', 'Bike computers'],
+  sensor: ['sensor', 'Sensors'],
+  handheld: ['handheld', 'Handhelds'],
+  app: ['app', 'Apps'],
+  other: ['device', 'Other devices'],
+}
+
+/** kindWord is a kind in words: "scale", or with capital "Scale". */
+export function kindWord(k: DeviceKind, capital = false): string {
+  const w = (kindWords[k] ?? kindWords.other)[0]
+  return capital ? w[0].toUpperCase() + w.slice(1) : w
+}
+
+/** The order the Devices page shows its groups in; apps join Other devices. */
+const groupOrder: DeviceKind[] = ['watch', 'scale', 'bike_computer', 'sensor', 'handheld', 'other']
+
+/** groupDevices groups devices by kind, in groupOrder, leaving out empty groups. */
+export function groupDevices(list: Device[]): { kind: DeviceKind; title: string; devices: Device[] }[] {
+  const by = new Map<DeviceKind, Device[]>()
+  for (const d of list) {
+    const k: DeviceKind = d.kind === 'app' || !groupOrder.includes(d.kind) ? 'other' : d.kind
+    by.set(k, [...(by.get(k) ?? []), d])
+  }
+  return groupOrder.filter((k) => by.has(k)).map((k) => ({ kind: k, title: kindWords[k][1], devices: by.get(k)! }))
 }
 
 /** The FIT file types a watch hands over, as people know them (the FIT profile's file types plus
  * Garmin's own health types). */
-const fitTypes: Record<number, string> = {
-  1: 'Device', 2: 'Settings', 3: 'Sport profile', 4: 'Activity', 5: 'Workout', 6: 'Course', 7: 'Schedule',
-  8: 'Locations', 9: 'Weight', 10: 'Totals', 11: 'Goals', 14: 'Blood pressure', 15: 'Monitoring', 20: 'Activity summary',
-  28: 'Daily totals', 32: 'Monitoring', 34: 'Segment', 35: 'Segments', 38: 'Sleep', 41: 'Totals', 44: 'Training metrics',
-  49: 'Sleep', 61: 'Blood pressure', 68: 'HRV', 70: 'Health', 71: 'Health', 72: 'Daily health', 73: 'Sleep summary',
-  74: 'Physiology', 77: 'Garmin Coach', 79: 'Health',
-}
 
+/** fitTypeName is a FIT file type in words, from the generated FIT profile (pkg/fitprofile). */
 export function fitTypeName(t: number): string {
-  return t < 0 ? 'Other file' : (fitTypes[t] ?? `Type ${t}`)
+  return t < 0 ? 'Other file' : (fitTypeTitles[t] ?? `Type ${t}`)
 }
 
 /** What a failed sync's code means, in words, and what happens next. */
@@ -60,6 +92,14 @@ export function subtitle(d: Pick<Device, 'nickname' | 'model' | 'name' | 'unit_i
 export function syncLine(d: Device, tz = '', now = Date.now(), serverSyncs = true): { text: string; detail: string; tone: Tone } {
   const s = d.sync
   if (!d.current) return { text: 'Handed over', detail: '', tone: 'idle' }
+  if (!isWatch(d)) {
+    return {
+      text: 'From imports',
+      detail: d.kind === 'scale' ? 'The scale sends its weigh-ins to Garmin Connect; they come in with your Garmin Connect export.'
+        : `goarmin reads this ${kindWord(d.kind)}'s files from imports.`,
+      tone: 'idle',
+    }
+  }
   if (!s) {
     return {
       text: 'Imported files only',
@@ -102,7 +142,7 @@ export function alerts(list: Device[], now = Date.now()): { device: Device; text
   const out: { device: Device; text: string }[] = []
   for (const d of list) {
     const s = d.sync
-    if (!d.current || !s || d.paused) continue
+    if (!d.current || !s || d.paused || !isWatch(d)) continue
     if (s.failures >= 3) {
       out.push({ device: d, text: `${watchName(d)}: ${s.failures} syncs failed in a row. ${errorHint(s.error_code)}` })
     } else if (s.last_good && now / 1000 - s.last_good > 86400) {

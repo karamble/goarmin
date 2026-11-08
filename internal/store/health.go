@@ -10,6 +10,8 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/karamble/goarmin/pkg/fitactivity"
@@ -74,9 +76,57 @@ func (z Zone) DayRange(day string) (from, to int64, err error) {
 	return local(m), local(m + 86400), nil
 }
 
-// Zone loads user's offset history.
+// Zone returns user's time-zone history as committed (cached).
 func (s *Store) Zone(ctx context.Context, user int64) (Zone, error) {
-	return s.zone(ctx, s.db.W, user)
+	s.zmu.Lock()
+	z, ok := s.zones[user]
+	gen := s.zgen[user]
+	s.zmu.Unlock()
+	if ok {
+		return z, nil
+	}
+	z, err := s.zone(ctx, s.db.R, user)
+	if err != nil {
+		return Zone{}, err
+	}
+	s.zmu.Lock()
+	if s.zgen[user] == gen {
+		s.zones[user] = z
+	}
+	s.zmu.Unlock()
+	return z, nil
+}
+
+// setZone records user's new committed zone (z), or forgets it (ok false) to load it again.
+func (s *Store) setZone(user int64, z Zone, ok bool) {
+	s.zmu.Lock()
+	defer s.zmu.Unlock()
+	s.zgen[user]++
+	if ok {
+		s.zones[user] = z
+	} else {
+		delete(s.zones, user)
+	}
+}
+
+// keeps reports whether z stays the same when the observations removed (UTC ts → offset) leave
+// the history and added join it. Rows inside a run of one offset can go, and rows that agree
+// with the zone at their time (after its first change) can come, without changing it.
+func (z Zone) keeps(removed, added map[int64]int64) bool {
+	if len(z.ts) == 0 {
+		return len(removed) == 0 && len(added) == 0
+	}
+	for t := range removed {
+		if _, found := slices.BinarySearch(z.ts, t); found {
+			return false
+		}
+	}
+	for t, o := range added {
+		if t < z.ts[0] || z.Offset(t) != o {
+			return false
+		}
+	}
+	return true
 }
 
 type querier interface {
@@ -95,7 +145,11 @@ func (s *Store) zone(ctx context.Context, q querier, user int64) (Zone, error) {
 			loc = l
 		}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT ts, offset_s FROM tz_offsets WHERE user_id = ?`, user)
+	// Only the rows where the offset changes: the zone is built from them alone (as NewZone
+	// would from all rows), and they are few.
+	rows, err := q.QueryContext(ctx, `SELECT ts, offset_s FROM (
+		SELECT ts, offset_s, LAG(offset_s) OVER (ORDER BY ts) AS prev FROM tz_offsets WHERE user_id = ?)
+		WHERE prev IS NULL OR prev != offset_s`, user)
 	if err != nil {
 		return Zone{}, err
 	}
@@ -111,9 +165,16 @@ func (s *Store) zone(ctx context.Context, q querier, user int64) (Zone, error) {
 	return NewZone(offs, loc), rows.Err()
 }
 
-// deleteFileData removes what one raw file contributed (its sleep sessions included).
+// deleteFileData removes what one raw file contributed. Nights merged from its sleep parts are
+// left to rebuildNights (the caller's): another file may describe the same night.
 func deleteFileData(ctx context.Context, tx *sql.Tx, file int64) error {
-	for _, t := range []string{"samples", "tz_offsets", "daily_values", "hrv_nightly", "sleep_sessions", "activities", "suggested_workouts",
+	if err := deleteSamples(ctx, tx, file); err != nil {
+		return err
+	}
+	for _, t := range []string{"tz_offsets", "daily_values", "hrv_nightly", "sleep_parts", "naps", "activities", "suggested_workouts",
+		"health_status", "hydration_logs", "health_snapshots", "account_documents",
+		"weigh_ins", "skin_temp_nightly", "ecg_recordings", "physiology", "gear", "golf_clubs", "personal_records", "settings_changes",
+		"device_series", "device_documents",
 		"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "courses"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE raw_file_id = ?`, file); err != nil {
 			return err
@@ -136,48 +197,74 @@ func nullUnknownF(v float64) any {
 	return v
 }
 
-// WriteFileData replaces what file contributed with d and records the ingest. Sleep sessions
-// are merged with what other files said about the same night. It returns the local days the
-// data touches, for RebuildDays.
+// WriteFileData replaces what file contributed with d and records the ingest. Its sleeps become
+// parts of nights, merged with what other files say about the same nights. It returns the local
+// days the data touches, for RebuildDays.
 func (s *Store) WriteFileData(ctx context.Context, f RawFile, d *wellness.Data, acts []fitactivity.Activity, handler string, version int) ([]string, error) {
 	days := map[string]bool{}
-	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
-		// The days this file wrote before are rebuilt too: a file ingested again (a decoder
-		// fix) may no longer reach them, and a day with nothing left must go.
-		if err := s.fileDays(ctx, tx, f, days); err != nil {
+	z0, err := s.Zone(ctx, f.UserID)
+	if err != nil {
+		return nil, err
+	}
+	var z Zone
+	changed := false
+	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
+		// A file ingested for the first time wrote nothing yet: nothing of it to find or delete.
+		var prior int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM ingest_state WHERE raw_file_id = ?`, f.ID).Scan(&prior); err != nil {
 			return err
 		}
-		for _, t := range []string{"samples", "tz_offsets", "daily_values", "hrv_nightly"} {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE raw_file_id = ?`, f.ID); err != nil {
+		fresh := prior == 0
+		removed := map[int64]int64{}
+		if !fresh {
+			// The days this file wrote before are rebuilt too: a file ingested again (a decoder
+			// fix) may no longer reach them, and a day with nothing left must go.
+			if err := fileDays(ctx, tx, f, z0, days); err != nil {
 				return err
 			}
+			var err error
+			if removed, err = fileOffsets(ctx, tx, f.ID); err != nil {
+				return err
+			}
+			if err := deleteSamples(ctx, tx, f.ID); err != nil {
+				return err
+			}
+			for _, t := range []string{"tz_offsets", "daily_values", "hrv_nightly", "weigh_ins", "skin_temp_nightly", "ecg_recordings", "physiology"} {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE raw_file_id = ?`, f.ID); err != nil {
+					return err
+				}
+			}
 		}
+		added := make(map[int64]int64, len(d.Offsets))
 		for _, o := range d.Offsets {
+			t, off := o.At.Unix(), int64(o.Offset/time.Second)
 			if _, err := tx.ExecContext(ctx, `INSERT INTO tz_offsets (user_id, ts, offset_s, raw_file_id) VALUES (?, ?, ?, ?)
 				ON CONFLICT (user_id, ts) DO UPDATE SET offset_s = excluded.offset_s, raw_file_id = excluded.raw_file_id`,
-				f.UserID, o.At.Unix(), int64(o.Offset/time.Second), f.ID); err != nil {
+				f.UserID, t, off, f.ID); err != nil {
+				return err
+			}
+			if was, ok := removed[t]; ok && was == off {
+				delete(removed, t) // written again as it was
+				continue
+			}
+			added[t] = off
+		}
+		z = z0
+		if !z0.keeps(removed, added) {
+			changed = true
+			if z, err = s.zone(ctx, tx, f.UserID); err != nil {
 				return err
 			}
 		}
-		z, err := s.zone(ctx, tx, f.UserID)
-		if err != nil {
-			return err
-		}
-		ins, err := tx.PrepareContext(ctx, `INSERT INTO samples (user_id, kind, ts, sub, value, raw_file_id) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (user_id, kind, ts, sub) DO UPDATE SET value = excluded.value, raw_file_id = excluded.raw_file_id`)
-		if err != nil {
-			return err
-		}
-		defer ins.Close()
 		seen := map[int64]bool{} // 15-minute slots: local midnight always falls on a slot boundary
+		closeDays(d.Samples, z)
+		if err := insertSamples(ctx, tx, f, d.Samples); err != nil {
+			return err
+		}
 		for _, smp := range d.Samples {
-			t := smp.At.Unix()
-			if _, err := ins.ExecContext(ctx, f.UserID, smp.Kind, t, smp.Sub, smp.Value, f.ID); err != nil {
-				return err
-			}
-			if slot := t / 900; !seen[slot] {
+			if slot := smp.At.Unix() / 900; !seen[slot] {
 				seen[slot] = true
-				days[z.Day(t)] = true
+				days[z.Day(slot*900)] = true
 			}
 		}
 		for _, v := range d.Daily {
@@ -186,35 +273,12 @@ func (s *Store) WriteFileData(ctx context.Context, f RawFile, d *wellness.Data, 
 				day = z.Day(v.At.Unix())
 			}
 			days[day] = true
-			if _, err := tx.ExecContext(ctx, `INSERT INTO daily_values (user_id, kind, day, ts, value, raw_file_id) VALUES (?, ?, ?, ?, ?, ?)
-				ON CONFLICT (user_id, kind, day) DO UPDATE SET value = excluded.value, ts = excluded.ts, raw_file_id = excluded.raw_file_id
-				WHERE excluded.ts >= daily_values.ts`, f.UserID, v.Kind, day, v.At.Unix(), v.Value, f.ID); err != nil {
+			if err := writeDaily(ctx, tx, f.UserID, f.ID, rankFIT, v.Kind, day, v.At.Unix(), v.Value); err != nil {
 				return err
 			}
 		}
-		for _, sl := range d.Sleep {
-			day := z.Day(sl.End.Unix())
-			days[day] = true
-			_, err := tx.ExecContext(ctx, `INSERT INTO sleep_sessions (user_id, start_ts, end_ts, day, score, quality_score,
-				duration_score, recovery_score, min_hr, bb_start, bb_end, deep_s, light_s, rem_s, awake_s, unmeasurable_s, raw_file_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (user_id, start_ts) DO UPDATE SET
-					end_ts = excluded.end_ts, day = excluded.day,
-					score = COALESCE(excluded.score, score), quality_score = COALESCE(excluded.quality_score, quality_score),
-					duration_score = COALESCE(excluded.duration_score, duration_score),
-					recovery_score = COALESCE(excluded.recovery_score, recovery_score),
-					min_hr = COALESCE(excluded.min_hr, min_hr), bb_start = COALESCE(excluded.bb_start, bb_start),
-					bb_end = COALESCE(excluded.bb_end, bb_end), deep_s = COALESCE(excluded.deep_s, deep_s),
-					light_s = COALESCE(excluded.light_s, light_s), rem_s = COALESCE(excluded.rem_s, rem_s),
-					awake_s = COALESCE(excluded.awake_s, awake_s), unmeasurable_s = COALESCE(excluded.unmeasurable_s, unmeasurable_s),
-					raw_file_id = excluded.raw_file_id`,
-				f.UserID, sl.Start.Unix(), sl.End.Unix(), day, nullUnknown(sl.Score), nullUnknown(sl.QualityScore),
-				nullUnknown(sl.DurationScore), nullUnknown(sl.RecoveryScore), nullUnknown(sl.MinHR),
-				nullUnknown(sl.BodyBatteryStart), nullUnknown(sl.BodyBatteryEnd), nullUnknown(sl.Deep), nullUnknown(sl.Light),
-				nullUnknown(sl.REM), nullUnknown(sl.Awake), nullUnknown(sl.Unmeasurable), f.ID)
-			if err != nil {
-				return err
-			}
+		if err := writeSleep(ctx, tx, f.UserID, f.ID, fitSleepParts(d.Sleep), d.Naps, z, days, fresh); err != nil {
+			return err
 		}
 		for _, h := range d.HRV {
 			day := z.Day(h.At.Unix())
@@ -231,7 +295,10 @@ func (s *Store) WriteFileData(ctx context.Context, f RawFile, d *wellness.Data, 
 				return err
 			}
 		}
-		if err := writeActivities(ctx, tx, f, acts, z, days); err != nil {
+		if err := writeHealth(ctx, tx, f, d, z, days); err != nil {
+			return err
+		}
+		if err := writeActivities(ctx, tx, f, acts, z, days, fresh); err != nil {
 			return err
 		}
 		if err := writeSuggestions(ctx, tx, f, d.Suggestions); err != nil {
@@ -248,6 +315,9 @@ func (s *Store) WriteFileData(ctx context.Context, f RawFile, d *wellness.Data, 
 		}
 		return recordIngest(ctx, tx, f.ID, handler, version, "ok", "", from, to, s.now())
 	})
+	if changed || err != nil {
+		s.setZone(f.UserID, z, err == nil)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -292,29 +362,114 @@ type DaySummary struct {
 	RespirationAvg, SpO2Avg, SleepScore, Sleep *int64
 }
 
-// fileDays adds the local days the file's stored samples, daily values and HRV nights cover.
-func (s *Store) fileDays(ctx context.Context, tx *sql.Tx, f RawFile, days map[string]bool) error {
-	z, err := s.zone(ctx, tx, f.UserID)
+// closeDays moves a running total stamped exactly at local midnight with a value one second
+// back, into the day it closes. Totals restart at midnight: a monitoring file's last record at
+// 00:00 holds the day before's total, and the next file's first record at the same second holds
+// 0. Stored at one key, whichever file came last won, so a day's steps depended on the order
+// files were read in (an import and a reingest disagreed).
+func closeDays(samples []wellness.Sample, z Zone) {
+	for i := range samples {
+		smp := &samples[i]
+		if smp.Value == 0 || !smp.Kind.Info().Total {
+			continue
+		}
+		if t := smp.At.Unix(); z.Day(t) != z.Day(t-1) {
+			smp.At = smp.At.Add(-time.Second)
+		}
+	}
+}
+
+// insertSamples writes file's samples, a later one replacing an earlier one at the same key.
+// One prepared single-row statement: the driver binds the parameters of a statement in
+// quadratic time, so INSERTs of many rows are slower, not faster (measured).
+func insertSamples(ctx context.Context, tx *sql.Tx, f RawFile, samples []wellness.Sample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	ins, err := tx.PrepareContext(ctx, `INSERT INTO samples (user_id, kind, ts, sub, value, raw_file_id) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (user_id, kind, ts, sub) DO UPDATE SET value = excluded.value, raw_file_id = excluded.raw_file_id`)
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ts / 900 FROM samples WHERE raw_file_id = ?`, f.ID)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var slot int64
-		if err := rows.Scan(&slot); err != nil {
-			rows.Close()
+	defer ins.Close()
+	for _, smp := range samples {
+		if _, err := ins.ExecContext(ctx, f.UserID, smp.Kind, smp.At.Unix(), smp.Sub, smp.Value, f.ID); err != nil {
 			return err
 		}
-		days[z.Day(slot*900)] = true
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	return nil
+}
+
+// sampleKinds lists the time-series kinds as SQL ("1, 2, …"): samples hold only those.
+var sampleKinds = func() string {
+	var b strings.Builder
+	for _, k := range wellness.Kinds() {
+		if !k.Info().Daily {
+			if b.Len() > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(strconv.Itoa(int(k)))
+		}
+	}
+	return b.String()
+}()
+
+// fileSpan returns the owner of file and the time span its ingests covered (ok false if it was
+// never ingested: then it wrote nothing).
+func fileSpan(ctx context.Context, tx *sql.Tx, file int64) (user, from, to int64, ok bool, err error) {
+	var u, a, b sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT f.user_id, MIN(i.span_from), MAX(i.span_to) FROM raw_files f
+		JOIN ingest_state i ON i.raw_file_id = f.id WHERE f.id = ?`, file).Scan(&u, &a, &b)
+	if err != nil || !u.Valid || !a.Valid || !b.Valid {
+		return 0, 0, 0, false, err
+	}
+	return u.Int64, a.Int64, b.Int64, true, nil
+}
+
+// deleteSamples removes what file wrote into samples. They lie within the span its ingests
+// covered, so the primary key finds them; an index by file would make every insert of a large
+// import a third dearer.
+func deleteSamples(ctx context.Context, tx *sql.Tx, file int64) error {
+	user, from, to, ok, err := fileSpan(ctx, tx, file)
+	if err != nil || !ok {
 		return err
 	}
-	for _, q := range []string{`SELECT DISTINCT day FROM daily_values WHERE raw_file_id = ?`, `SELECT DISTINCT day FROM hrv_nightly WHERE raw_file_id = ?`} {
+	_, err = tx.ExecContext(ctx, `DELETE FROM samples WHERE user_id = ? AND kind IN (`+sampleKinds+`) AND ts >= ? AND ts <= ?
+		AND raw_file_id = ?`, user, from, to, file)
+	return err
+}
+
+// fileOffsets returns the time-zone observations file wrote (UTC ts → offset).
+func fileOffsets(ctx context.Context, tx *sql.Tx, file int64) (map[int64]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT ts, offset_s FROM tz_offsets WHERE raw_file_id = ?`, file)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var t, o int64
+		if err := rows.Scan(&t, &o); err != nil {
+			return nil, err
+		}
+		out[t] = o
+	}
+	return out, rows.Err()
+}
+
+// fileDays adds the local days the file's stored samples, daily values, HRV nights and
+// activities cover (its nights: writeSleep), in zone z.
+func fileDays(ctx context.Context, tx *sql.Tx, f RawFile, z Zone, days map[string]bool) error {
+	// Its samples: every day of the span its last ingest covered.
+	if _, from, to, ok, err := fileSpan(ctx, tx, f.ID); err != nil {
+		return err
+	} else if ok && to >= from && to-from < 400*86400 {
+		for d, last := z.Day(from), z.Day(to); d <= last; d = nextDay(d) {
+			days[d] = true
+		}
+	}
+	for _, q := range []string{`SELECT DISTINCT day FROM daily_values WHERE raw_file_id = ?`, `SELECT DISTINCT day FROM hrv_nightly WHERE raw_file_id = ?`,
+		`SELECT DISTINCT day FROM activities WHERE raw_file_id = ?`} {
 		rows, err := tx.QueryContext(ctx, q, f.ID)
 		if err != nil {
 			return err
@@ -371,11 +526,11 @@ func (s *Store) RebuildDays(ctx context.Context, user int64, days []string) erro
 	if len(days) == 0 {
 		return nil
 	}
+	z, err := s.Zone(ctx, user)
+	if err != nil {
+		return err
+	}
 	return s.db.Tx(ctx, func(tx *sql.Tx) error {
-		z, err := s.zone(ctx, tx, user)
-		if err != nil {
-			return err
-		}
 		for _, day := range days {
 			if err := s.rebuildDay(ctx, tx, user, day, z); err != nil {
 				return err
@@ -440,6 +595,50 @@ func (s *Store) rebuildDay(ctx context.Context, tx *sql.Tx, user int64, day stri
 		{"respiration_avg", func() (any, error) { return agg("AVG", wellness.Respiration) }},
 		{"spo2_avg", func() (any, error) { return agg("AVG", wellness.SpO2) }},
 	}
+	// A day without monitoring files takes what the export's daily summaries say (a watch's
+	// own samples always win).
+	fallback := map[string]struct {
+		k     wellness.Kind
+		scale int64
+	}{
+		"steps": {wellness.DaySteps, 1}, "distance_cm": {wellness.DayDistance, 100}, "active_kcal": {wellness.DayActiveKcal, 1},
+		"ascent_mm": {wellness.FloorsUp, 10}, "descent_mm": {wellness.FloorsDown, 10}, "moderate_min": {wellness.DayModerate, 1},
+		"vigorous_min": {wellness.DayVigorous, 1}, "hr_min": {wellness.MinHR, 1}, "hr_max": {wellness.DayMaxHR, 1},
+		"stress_avg": {wellness.DayStress, 1}, "bb_min": {wellness.DayBBLow, 1}, "bb_max": {wellness.DayBBHigh, 1},
+		"respiration_avg": {wellness.DayRespiration, 1},
+	}
+	var dayVals map[wellness.Kind]int64
+	fromExport := func(name string) (any, error) {
+		f, ok := fallback[name]
+		if !ok {
+			return nil, nil
+		}
+		if dayVals == nil {
+			dayVals = map[wellness.Kind]int64{}
+			rows, err := tx.QueryContext(ctx, `SELECT kind, value FROM daily_values WHERE user_id = ? AND day = ? AND kind >= ?`,
+				user, day, wellness.MinHR)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				var k wellness.Kind
+				var v int64
+				if err := rows.Scan(&k, &v); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				dayVals[k] = v
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if v, ok := dayVals[f.k]; ok {
+			return v * f.scale, nil
+		}
+		return nil, nil
+	}
 	vals := make([]any, 0, len(cols)+5)
 	vals = append(vals, user, day)
 	names := "user_id, day"
@@ -448,6 +647,11 @@ func (s *Store) rebuildDay(ctx context.Context, tx *sql.Tx, user int64, day stri
 		v, err := c.get()
 		if err != nil {
 			return err
+		}
+		if v == nil {
+			if v, err = fromExport(c.name); err != nil {
+				return err
+			}
 		}
 		vals = append(vals, v)
 		names += ", " + c.name

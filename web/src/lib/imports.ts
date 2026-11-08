@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 import type { ImportReport, ImportRun, USBWatch } from '../api/types'
+import { int } from './format'
 
 /** A file to upload with its path in what was picked ("GARMIN/Activity/x.fit"). */
 export interface Picked {
@@ -54,15 +55,40 @@ export const statusWords: Record<ImportRun['status'], string> = {
 export function reportLine(r: ImportReport, running = false): string {
   const parts: string[] = []
   const n = (v: number | undefined) => v ?? 0
-  if (running) parts.push(`${n(r.seen) + n(r.kept)} files read`)
-  if (n(r.new) || !running) parts.push(`${n(r.new)} new`)
+  const f = (v: number) => int(v)
+  if (running) parts.push(`${f(n(r.seen) + n(r.kept))} files read`)
+  if (n(r.new) || !running) parts.push(`${f(n(r.new))} new`)
   const here = n(r.known) + n(r.duplicates) + n(r.unchanged)
-  if (here) parts.push(`${here} already here`)
-  if (n(r.kept)) parts.push(`${n(r.kept)} kept for later`)
-  if (n(r.waiting)) parts.push(`${n(r.waiting)} waiting for an owner`)
-  if (n(r.failed)) parts.push(`${n(r.failed)} failed`)
+  if (here) parts.push(`${f(here)} already here`)
+  if (n(r.kept)) parts.push(`${f(n(r.kept))} kept for later`)
+  if (n(r.waiting)) parts.push(`${f(n(r.waiting))} waiting for an owner`)
+  if (n(r.failed)) parts.push(`${f(n(r.failed))} failed`)
   if (!running && !n(r.seen) && !n(r.kept)) return n(r.other) ? `no FIT files, ${n(r.other)} other files left out` : 'nothing to import'
   return parts.join(', ')
+}
+
+/** importProgress is how far a running import has come: files dealt with, of how many it knows
+ * of, as a percentage (null while it cannot tell). */
+export function importProgress(r: ImportReport): { read: number; found: number; pct: number | null } {
+  const read = r.read ?? 0
+  const found = Math.max(r.found ?? 0, read)
+  return { read, found, pct: found > 0 ? Math.min(100, Math.floor((read / found) * 100)) : null }
+}
+
+/** elapsedWords is a duration in seconds as "42 s", "3 min 05 s", "1 h 02 min". */
+export function elapsedWords(secs: number): string {
+  const s = Math.max(0, Math.floor(secs))
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min ${String(s % 60).padStart(2, '0')} s`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`
+}
+
+/** rateWords is the files dealt with per second ("" before there is a rate to tell). */
+export function rateWords(read: number, secs: number): string {
+  if (secs < 2 || read === 0) return ''
+  const r = read / secs
+  return r >= 10 ? `${Math.round(r)} files/s` : `${r.toFixed(1)} files/s`
 }
 
 /** keptFolders lists an export's folders with what was kept from each, largest first. */
