@@ -179,26 +179,47 @@ func (s *Store) libraryWants(ctx context.Context, user int64) (map[int64]map[str
 }
 
 // wantOn works out whether a library workout is wanted on a watch and what the next sync does
-// about it, into p (its State and At already set).
-func wantOn(p *WorkoutPresence, w LibraryWatch, t target, switched bool, x *sendState) {
-	p.Want = p.State == PresenceOn // never switched: wanted while the watch has it
+// about it, into p (its State and At already set): shown is the version the library shows,
+// listed the workout's items the watch lists now.
+//
+// The watch has the current version when it has the workout at all, unless the version shown
+// is goarmin's own (an edit or a rename): then only once goarmin sent that version and the
+// watch lists it. An older version it still lists is an old copy, to delete on the watch.
+func wantOn(p *WorkoutPresence, w LibraryWatch, t target, switched bool, x *sendState, shown WorkoutRow, listed map[string]bool) {
+	p.Want = p.State == PresenceOn // never switched: wanted while the watch has any version
 	if switched {
 		p.Want = t.want
 		if t.want && p.State == PresenceRemoved && p.At.After(t.updated) {
 			p.Want = false // deleted on the watch after it was switched on (in the same second, the switch came after)
 		}
 	}
+	// The wish to send began with the switch, or with the edit if that is newer.
+	since := t.updated
+	edited := shown.Origin == OriginGoarmin
+	if edited && shown.RecordedAt.After(since) {
+		since = shown.RecordedAt
+	}
+	current := p.State == PresenceOn
+	sentNow := x != nil && x.ok && x.uid != "" && listed[x.uid] && !x.at.Before(shown.RecordedAt)
+	if edited {
+		current = p.State == PresenceOn && sentNow
+		for uid := range listed {
+			if !sentNow || uid != x.uid {
+				p.OldCopies++
+			}
+		}
+	}
 	if x != nil && !x.ok {
 		p.Failed = x.err
 	}
 	switch {
-	case p.Want && p.State != PresenceOn:
+	case p.Want && !current:
 		switch {
 		case w.SendSupport == "no":
 			p.Failed = "this watch does not take workouts from goarmin"
-		case x != nil && x.refused && !x.at.Before(t.updated):
-			// The watch refused it since it was switched on: not again until switched anew.
-		case x != nil && x.ok && x.gone == 0 && !x.at.Before(t.updated):
+		case x != nil && x.refused && !x.at.Before(since):
+			// The watch refused it since it was switched on or edited: not again until then.
+		case x != nil && x.ok && x.gone == 0 && !x.at.Before(since):
 			// Sent, and the watch has not missed it (it may not have listed it yet).
 		default:
 			p.Pending = PendingSend

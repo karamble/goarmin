@@ -68,7 +68,7 @@ func Build(ctx context.Context, st *store.Store, blobs *blobstore.Store, user, d
 		if len(out) == MaxFiles {
 			break
 		}
-		data, err := fileOf(ctx, st, blobs, e)
+		data, err := WorkoutFile(ctx, st, blobs, e)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("outbox: %s: %w", e.Version.Name, err))
 			continue
@@ -78,8 +78,9 @@ func Build(ctx context.Context, st *store.Store, blobs *blobstore.Store, user, d
 	return out, errors.Join(errs...)
 }
 
-// fileOf is the workout file to send for an outbox entry.
-func fileOf(ctx context.Context, st *store.Store, blobs *blobstore.Store, e store.OutboxEntry) ([]byte, error) {
+// WorkoutFile is the workout file for an entry's version: a watch's file as it is, else the
+// version written as Garmin Connect writes workouts (the same bytes for the same version).
+func WorkoutFile(ctx context.Context, st *store.Store, blobs *blobstore.Store, e store.OutboxEntry) ([]byte, error) {
 	v := e.Version
 	if v.Origin == store.OriginWatch && v.RawFileID != 0 {
 		f, err := st.RawFile(ctx, v.RawFileID)

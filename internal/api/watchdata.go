@@ -141,6 +141,7 @@ func workoutJSON(x store.WorkoutRow, steps bool) map[string]any {
 func libraryJSON(x store.LibraryWorkout, watches []store.LibraryWatch, steps bool) map[string]any {
 	out := workoutJSON(x.WorkoutRow, steps)
 	out["origins"] = x.Origins
+	out["made_here"] = !slices.ContainsFunc(x.Versions, func(v store.WorkoutRow) bool { return v.Origin != store.OriginGoarmin })
 	ws := []map[string]any{}
 	for i, p := range x.Watches {
 		d := watches[i]
@@ -157,6 +158,9 @@ func libraryJSON(x store.LibraryWorkout, watches []store.LibraryWatch, steps boo
 		}
 		if p.Failed != "" {
 			m["failed"] = p.Failed
+		}
+		if p.OldCopies > 0 {
+			m["old_copies"] = p.OldCopies
 		}
 		if !d.InventoryAt.IsZero() {
 			m["checked_at"] = d.InventoryAt.Unix()

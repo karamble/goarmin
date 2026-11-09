@@ -282,7 +282,8 @@ describe('watch data', () => {
     })
     const calls = () => fn.mock.calls as unknown as [string, RequestInit | undefined][]
     page(<Workout />, '/training/workouts/4', '/training/workouts/:id')
-    fireEvent.click(await screen.findByRole('button', { name: 'Rename' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'More for 6 × 400 m' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
     const name = screen.getByRole('textbox', { name: /^Name/ })
     fireEvent.change(name, { target: { value: '  6 × 400 m   fast ' } })
     shown = renamed

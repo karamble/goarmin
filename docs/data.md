@@ -110,10 +110,14 @@ or not:
   FIT's 255 bytes is cut). The watch names the new item, so the library shows the workout on it
   at once; the next sync pulls the file back, the same bytes. `workout_targets` holds the
   switches, `watch_sends` what was sent and the watch's answer.
-- **Renamed in goarmin.** A rename (or a new description) is goarmin's own version of the
-  workout (origin `goarmin`, no file), one per workout, shown in place of the others; the
-  originals stay, and *Back to the original* drops the rename. The workout stays one entry
+- **Made, edited or renamed in goarmin.** The editor's work and a rename are goarmin's own
+  version of the workout (origin `goarmin`, no file), one per workout, shown in place of the
+  others; the originals stay, and *Back to the original* drops it. A workout made in goarmin has
+  that version only, and deleting it removes it from the library. The workout stays one entry
   (`workouts.entry_key`), also when the watch later hands back a file under the new name.
+- **Which version a watch has.** A watch has the current version of a workout goarmin edited
+  only once goarmin sent that version and the watch lists it; until then the next sync sends it.
+  Other versions the watch still lists are old copies, to delete on the watch.
 
 ## Time and days
 

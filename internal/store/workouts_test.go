@@ -272,10 +272,10 @@ func TestWorkoutRename(t *testing.T) {
 	}
 
 	// Only goarmin's own version can be removed, and only by its account.
-	if err := st.DeleteWorkoutVersion(ctx, u.ID, cp.ID); err != ErrNotFound {
+	if err := st.DeleteWorkoutVersion(ctx, u.ID, cp.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("removing a watch's version: %v", err)
 	}
-	if err := st.DeleteWorkoutVersion(ctx, other.ID, id); err != ErrNotFound {
+	if err := st.DeleteWorkoutVersion(ctx, other.ID, id); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another account: %v", err)
 	}
 	if err := st.DeleteWorkoutVersion(ctx, u.ID, id); err != nil {
@@ -424,4 +424,126 @@ func TestWorkoutOutbox(t *testing.T) {
 		t.Fatalf("send support after a refusal as unsupported: %q", d.SendSupport)
 	}
 	check("no pushes", map[string]want{"Bravo": {PresenceRemoved, "", true}, "Charlie": {PresenceRemoved, "", true}})
+}
+
+// TestWorkoutEdits edits a workout the watch has: the edit goes to the watch, the old version
+// stays there as an old copy until deleted on the watch. A workout made in goarmin is a new
+// entry; deleting it takes its switches along.
+func TestWorkoutEdits(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	now := time.Now().Truncate(time.Second)
+	clock := now
+	st.SetClock(func() time.Time { return clock })
+	u := person(t, st, "a@example.invalid")
+	dev, err := st.EnsureDevice(ctx, Device{UnitID: 14, Name: "fenix 8 - 47mm", Address: "AA:BB:CC:DD:EE:14"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AssignIfUnowned(ctx, dev.ID, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	const uidOld, uidNew, uidNewer = "4319872000000031-0100000000000001", "4319872000000032-0100000000000002", "4319872000000033-0100000000000003"
+	orig := watchWorkout(t, st, u.ID, dev.ID, uidOld, "Tempo", "running", now.AddDate(0, 0, -3))
+	if err := st.LinkWatchItem(ctx, dev.ID, uidOld, "FIT_TYPE_5", orig.ID); err != nil {
+		t.Fatal(err)
+	}
+	stock := func(at time.Time, uids ...string) {
+		t.Helper()
+		var items []InventoryItem
+		for _, uid := range uids {
+			items = append(items, item(uid))
+		}
+		if err := st.SetWatchInventory(ctx, dev.ID, WatchInventory{Types: []string{"FIT_TYPE_5"}, At: at, Items: items}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stock(now.Add(-time.Hour), uidOld)
+	type want struct {
+		pending string
+		old     int
+		outbox  int
+	}
+	check := func(step, name string, e want) LibraryWorkout {
+		t.Helper()
+		lib, err := st.WorkoutLibrary(ctx, u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, _ := states(t, lib, name)
+		p := w.Watches[0]
+		out, _ := st.WatchOutbox(ctx, u.ID, dev.ID)
+		if p.Pending != e.pending || p.OldCopies != e.old || len(out) != e.outbox {
+			t.Errorf("%s: pending %q, old copies %d, outbox %d; want %+v (state %s)", step, p.Pending, p.OldCopies, len(out), e, p.State)
+		}
+		return w
+	}
+	check("the original on the watch", "Tempo", want{"", 0, 0})
+
+	clock = now.Add(time.Minute)
+	lib, _ := st.WorkoutLibrary(ctx, u.ID)
+	w, _ := states(t, lib, "Tempo")
+	edit := w.Workout
+	edit.Steps = append(edit.Steps, fitwatch.Step{Index: 1, Intensity: "cooldown", Duration: "time", DurationValue: 300})
+	if _, err := st.SaveWorkoutVersion(ctx, u.ID, w.EntryKey, edit, ""); err != nil {
+		t.Fatal(err)
+	}
+	check("edited", "Tempo", want{PendingSend, 1, 1})
+
+	clock = now.Add(2 * time.Minute)
+	if err := st.RecordSends(ctx, u.ID, dev.ID, []SendRecord{{EntryKey: w.EntryKey, Reason: SendReasonLibrary, SHA256: "aa", UID: uidNew}}, clock); err != nil {
+		t.Fatal(err)
+	}
+	stock(now.Add(3*time.Minute), uidOld, uidNew)
+	check("the edit sent", "Tempo", want{"", 1, 0})
+	// The next sync pulls the sent file back, as the watch's.
+	back := watchWorkout(t, st, u.ID, dev.ID, uidNew, "Tempo", "running", now.Add(time.Minute))
+	if err := st.LinkWatchItem(ctx, dev.ID, uidNew, "FIT_TYPE_5", back.ID); err != nil {
+		t.Fatal(err)
+	}
+	check("handed back", "Tempo", want{"", 1, 0})
+	stock(now.Add(4*time.Minute), uidNew)
+	check("the old copy deleted on the watch", "Tempo", want{"", 0, 0})
+
+	clock = now.Add(5 * time.Minute)
+	edit.Steps[1].DurationValue = 600
+	if _, err := st.SaveWorkoutVersion(ctx, u.ID, w.EntryKey, edit, ""); err != nil {
+		t.Fatal(err)
+	}
+	check("edited again", "Tempo", want{PendingSend, 1, 1})
+	clock = now.Add(6 * time.Minute)
+	if err := st.RecordSends(ctx, u.ID, dev.ID, []SendRecord{{EntryKey: w.EntryKey, Reason: SendReasonLibrary, SHA256: "bb", UID: uidNewer}}, clock); err != nil {
+		t.Fatal(err)
+	}
+	check("sent again, not yet listed", "Tempo", want{"", 1, 0})
+
+	// A workout made in goarmin: a new entry, its name not taken by another.
+	made := fitwatch.Workout{Name: "Hills", Sport: "running", SubSport: "generic",
+		Steps: []fitwatch.Step{{Index: 0, Intensity: "active", Duration: "time", DurationValue: 120}}}
+	if _, err := st.CreateWorkout(ctx, u.ID, fitwatch.Workout{Name: "tempo", Sport: "running"}, ""); !errors.Is(err, ErrWorkoutNameTaken) {
+		t.Fatalf("a taken name: %v", err)
+	}
+	id, err := st.CreateWorkout(ctx, u.ID, made, "Up and down")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := check("made in goarmin", "Hills", want{"", 0, 0})
+	if h.ID != id || h.Origin != OriginGoarmin || h.Watches[0].Want || h.Description != "Up and down" {
+		t.Fatalf("made %+v", h)
+	}
+	if err := st.SetWorkoutTarget(ctx, u.ID, dev.ID, h.EntryKey, true); err != nil {
+		t.Fatal(err)
+	}
+	check("switched on", "Hills", want{PendingSend, 0, 1})
+	if err := st.DeleteWorkoutVersion(ctx, u.ID, id); err != nil {
+		t.Fatal(err)
+	}
+	lib, _ = st.WorkoutLibrary(ctx, u.ID)
+	if len(lib.Workouts) != 1 {
+		t.Fatalf("after deleting the made workout: %d workouts", len(lib.Workouts))
+	}
+	var n int
+	if err := st.db.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM workout_targets WHERE entry_key = ?`, h.EntryKey).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d switches left, %v", n, err)
+	}
 }

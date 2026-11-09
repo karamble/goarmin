@@ -5,7 +5,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, request } from '../client'
 import { keys } from '../keys'
-import type { Activity, ActivityDetail, ActivityPage, Course, Neighbours, Streams, Totals, WatchProfile, Workout, ZonesInfo } from '../types'
+import type { Activity, ActivityDetail, ActivityPage, Course, Neighbours, Streams, Totals, WatchProfile, Workout, WorkoutBody, WorkoutSport, ZonesInfo } from '../types'
 
 /** useActivityPages pages through every activity, newest first (Load more). */
 export function useActivityPages(limit = 30) {
@@ -86,6 +86,25 @@ export function useWorkouts() {
 /** useWorkout is one workout with its steps (null when it is not there). */
 export function useWorkout(id: number) {
   return useQuery({ queryKey: keys.workout(id), queryFn: () => nullOn404(request<Workout>('GET', `/workouts/${id}`)), enabled: id > 0 })
+}
+
+/** useWorkoutSports are the sports a workout made in goarmin can have. */
+export function useWorkoutSports() {
+  return useQuery({ queryKey: ['training', 'workout-sports'], queryFn: () => request<WorkoutSport[]>('GET', '/workout-sports'), staleTime: Infinity })
+}
+
+/** useSaveWorkout makes a workout (no id) or saves an edited one; it refreshes the library. */
+export function useSaveWorkout() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: number; body: WorkoutBody }) =>
+      id ? request<Workout>('PUT', `/workouts/${id}`, body) : request<Workout>('POST', '/workouts', body),
+    onSuccess: (w) => {
+      qc.setQueryData(keys.workout(w.id), w)
+      void qc.invalidateQueries({ queryKey: keys.workouts })
+      void qc.invalidateQueries({ queryKey: keys.calendarAll })
+    },
+  })
 }
 
 /** useWorkoutEdits renames a workout or changes its description (goarmin keeps its own

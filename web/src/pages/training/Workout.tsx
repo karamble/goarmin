@@ -2,7 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { CalendarPlus, Pencil, PersonStanding, Repeat, Undo2 } from 'lucide-react'
+import { CalendarPlus, MoreHorizontal, Pencil, PersonStanding, Repeat, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
@@ -11,7 +11,8 @@ import type { Workout, WorkoutStep, WorkoutWatch } from '../../api/types'
 import { usePlanActions } from '../../api/hooks/calendar'
 import { HeaderActions, useSectionTitle } from '../../app/section/HeaderSlot'
 import { useToday } from '../../app/section/usePeriod'
-import { Sheet } from '../../ui/Sheet'
+import { Confirm, Sheet } from '../../ui/Sheet'
+import { Menu } from '../../ui/Menu'
 import { Switch } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
 import { hm, type Units } from '../../lib/format'
@@ -29,6 +30,8 @@ export default function WorkoutPage() {
   const [figure, setFigure] = useState<number | null>(null)
   const [planning, setPlanning] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const navigate = useNavigate()
   const { undo } = useWorkoutEdits()
   const toast = useToast()
   useSectionTitle(q.data?.name)
@@ -50,15 +53,30 @@ export default function WorkoutPage() {
         return (
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
             <HeaderActions>
-              <button type="button" onClick={() => setRenaming(true)}
+              <Link to={`/training/workouts/${w.id}/edit`}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-muted hover:border-lime hover:text-text">
-                <Pencil size={14} aria-hidden /> Rename
-              </button>
+                <Pencil size={14} aria-hidden /> Edit
+              </Link>
               <button type="button" onClick={() => setPlanning(true)}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-lime hover:border-lime">
                 <CalendarPlus size={14} aria-hidden /> Plan
               </button>
+              <Menu label={`More for ${w.name}`} icon={<MoreHorizontal size={16} />} items={[
+                { label: 'Rename', run: () => setRenaming(true) },
+                { label: 'Duplicate and edit', run: () => navigate(`/training/workouts/new?from=${w.id}`) },
+                { label: 'Download as a FIT file', run: () => { window.location.href = `/api/workouts/${w.id}/fit` } },
+                ...(w.made_here ? [{ label: 'Delete', run: () => setDeleting(true), danger: true }] : []),
+              ]} />
             </HeaderActions>
+            {deleting && (
+              <Confirm title={`Delete ${w.name}?`} confirm="Delete" danger onClose={() => setDeleting(false)}
+                onConfirm={() => undo.mutate(w.id, {
+                  onSuccess: () => { toast({ text: `${w.name} deleted` }); navigate('/training/workouts') },
+                  onError: (e) => toast({ text: `Not deleted: ${(e as Error).message}`, tone: 'error' }),
+                })}>
+                It leaves your library. A watch that has it keeps it until you delete it on the watch.
+              </Confirm>
+            )}
             {planning && <PlanOn id={w.id} name={w.name} onClose={() => setPlanning(false)} />}
             {renaming && <Rename w={w} onClose={() => setRenaming(false)} />}
             <section className="card p-5 sm:p-6">
@@ -140,6 +158,12 @@ function OnWatches({ w }: { w: Workout }) {
               <p className="m-0 text-[14px] text-text">{x.name}</p>
               <p className="m-0 text-[13px] text-muted">{watchLine(x, w.name)}</p>
               {x.failed && <p className="m-0 text-[13px] text-[#e08585]">Not sent: {x.failed}</p>}
+              {(x.old_copies ?? 0) > 0 && (
+                <p className="m-0 text-[13px] text-amber">
+                  {x.old_copies === 1 ? 'An older version is' : `${x.old_copies} older versions are`} still on the watch: delete {x.old_copies === 1 ? 'it' : 'them'} there
+                  (Workouts › the workout › Delete).
+                </p>
+              )}
             </div>
           </li>
         ))}

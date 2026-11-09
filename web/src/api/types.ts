@@ -328,6 +328,25 @@ export interface WorkoutWatch {
   pending?: 'send' | 'remove'
   /** Why the last try to send it failed. */
   failed?: string
+  /** Older versions the watch still lists: goarmin sent an edit, the old one waits to be
+   * deleted on the watch. */
+  old_copies?: number
+}
+
+/** A sport a workout made in goarmin can have. */
+export interface WorkoutSport {
+  sport: string
+  sub_sport: string
+  label: string
+}
+
+/** A workout as the editor saves it. */
+export interface WorkoutBody {
+  name: string
+  sport: string
+  sub_sport: string
+  description: string
+  steps: WorkoutStep[]
 }
 
 export interface WorkoutVersion {
@@ -351,6 +370,8 @@ export interface Workout {
   recorded_at: number
   origin: WorkoutOrigin
   origins: WorkoutOrigin[]
+  /** Made in goarmin: only goarmin's own version (it can be deleted). */
+  made_here?: boolean
   description?: string
   watches: WorkoutWatch[]
   steps?: WorkoutStep[]

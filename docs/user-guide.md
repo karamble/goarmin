@@ -103,6 +103,27 @@ the same numbers.
       delete from a watch: the page says to delete it on the watch (Workouts › the workout ›
       Delete), and notices when it is gone. A workout you delete on the watch is not sent again
       until you switch it on again.
+    - **New workout** (in the header, or *New workout* in the palette) opens the workout editor;
+      on a workout's page, **Edit** opens it on that workout, and its menu offers *Duplicate and
+      edit*, *Rename*, *Download as a FIT file* and, for a workout made in goarmin, *Delete*.
+    - **The editor:** a name (a watch shows 40 characters), a sport, a description, and the steps:
+      - each step has an intensity (warm-up, work, recovery, rest, cool-down), a duration (a
+        time such as `1:30`, a distance in your units, reps, calories, until you press Lap, or
+        until your heart rate is above or below a value) and a target (a heart-rate zone or
+        range, a pace or speed range, power, cadence), notes (a watch shows 50 characters), and
+        for strength, cardio, yoga, pilates, HIIT and mobility an exercise with its 3D figure
+        and a weight;
+      - a **repeat** holds steps and runs them a number of times, or as many rounds as fit in a
+        time; *Repeat this step* starts one, *Move into the repeat above* and *Move out of the
+        repeat* change what it holds, *Ungroup* ends it;
+      - drag a step by its grip, or use its menu (also by keyboard); the strip on top shows the
+        intensities and the time as you build;
+      - what keeps the workout from being saved is listed under the steps;
+      - leaving with changes asks first, and changes you did not save are offered again when
+        you come back.
+    - **Editing a workout from the watch or Garmin Connect** keeps the original. A watch that
+      has the workout gets the edited version at its next sync and keeps the old one: the page
+      says "An older version is still on the watch" until you delete it there.
     - **Rename** gives a workout another name or description (Garmin Connect's copies start
       with "Copy of"). goarmin keeps it as its own version and keeps the original too: *Back to
       the original* undoes it.

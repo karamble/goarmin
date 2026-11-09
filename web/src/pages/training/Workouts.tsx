@@ -2,7 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { Search, Watch } from 'lucide-react'
+import { Plus, Search, Watch } from 'lucide-react'
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useWorkouts } from '../../api/hooks/training'
@@ -10,6 +10,7 @@ import type { Workout, WorkoutOrigin, WorkoutWatch } from '../../api/types'
 import { sportIcon } from '../../glance/cards/sport'
 import { ago, hm } from '../../lib/format'
 import { filterLibrary, originText, originWords, presenceText, sportKey, watchShares, type LibraryFilter } from '../../lib/workoutLibrary'
+import { HeaderActions } from '../../app/section/HeaderSlot'
 import { Loaded } from '../health/parts'
 
 export { sportWords } from '../../lib/workoutLibrary'
@@ -38,6 +39,12 @@ export default function Workouts() {
   const all = useMemo(() => q.data ?? [], [q.data])
   const shown = useMemo(() => filterLibrary(all, f), [all, f])
   return (
+    <>
+    <HeaderActions>
+      <Link to="/training/workouts/new" className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-lime hover:border-lime">
+        <Plus size={14} aria-hidden /> New workout
+      </Link>
+    </HeaderActions>
     <Loaded q={[q]}>
       {() => all.length === 0 ? (
         <section className="card grid place-items-center px-6 py-12 text-center">
@@ -45,6 +52,7 @@ export default function Workouts() {
           <p className="m-0 mt-2 max-w-[520px] text-[14px] text-muted">
             Workouts on your watch (sent from Garmin Connect, or made on the watch) arrive with the next sync. The workouts of your
             Garmin Connect account come with its export, under <Link to="/devices/import" className="text-lime hover:underline">Devices › Import</Link>.
+            Or <Link to="/training/workouts/new" className="text-lime hover:underline">make one here</Link>.
           </p>
         </section>
       ) : (
@@ -64,6 +72,7 @@ export default function Workouts() {
         </div>
       )}
     </Loaded>
+    </>
   )
 }
 
