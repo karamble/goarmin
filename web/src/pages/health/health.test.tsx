@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Day, Night } from '../../api/types'
 import { PeriodsContext, usePeriod } from '../../app/section/usePeriod'
-import { addDays, today } from '../../lib/period'
+import { addDays, periodRange, today } from '../../lib/period'
 import { fixtureMe, json, renderWith, stubApi, where } from '../../test/fixtures'
 import Breathing from './Breathing'
 import Energy from './Energy'
@@ -20,6 +20,8 @@ import Sleep from './Sleep'
 afterEach(() => vi.unstubAllGlobals())
 
 const day = today('UTC') // the test account's zone (fixtureMe timezone UTC), not the machine's
+// A past week's first day: its first days are all on a week page whatever weekday today is.
+const pastWeek = periodRange(addDays(day, -7), 'week').from
 const now = Math.floor(Date.now() / 1000)
 const from = now - 12 * 3600
 const periods = ['day', 'week', 'month', 'year'] as const
@@ -106,7 +108,9 @@ describe('health pages', () => {
     const { unmount } = show(<Hrv />, '/health/hrv')
     await img(/^Last night 57 ms, balanced range 46 to 60 ms$/)
     unmount()
-    show(<Hrv />, '/health/hrv?p=week')
+    const w = (i: number, v: number) => dayRow(addDays(pastWeek, i), { values: { hrv_last_night: v, hrv_target_low: 46, hrv_target_high: 60 } })
+    stubApi({ '/api/daily': json([w(0, 57), w(1, 65), w(2, 50)]), '/api/sleep': json([]) })
+    show(<Hrv />, `/health/hrv?d=${pastWeek}&p=week`)
     await img(/^HRV over \d nights: .*; 1 outside the balanced range$/)
   })
 
@@ -124,14 +128,14 @@ describe('health pages', () => {
   })
 
   it('Breathing and Movement over a week', async () => {
-    const days = [0, 1, 2].map((i) => dayRow(addDays(day, -i), { respiration_avg: 14 + i / 10, spo2_avg: 95, steps: 8000 + i * 1000, distance_m: 6000,
+    const days = [0, 1, 2].map((i) => dayRow(addDays(pastWeek, i), { respiration_avg: 14 + i / 10, spo2_avg: 95, steps: 8000 + i * 1000, distance_m: 6000,
       values: { step_goal: 8500 } }))
     stubApi({ '/api/daily': json(days) })
-    const { unmount } = show(<Breathing />, '/health/breathing?p=week')
+    const { unmount } = show(<Breathing />, `/health/breathing?d=${pastWeek}&p=week`)
     await img(/^Daily respiration: minimum 14.0/)
     await img(/^Daily SpO2: minimum 95/)
     unmount()
-    show(<Movement />, '/health/movement?p=week')
+    show(<Movement />, `/health/movement?d=${pastWeek}&p=week`)
     await img(/^Daily steps: minimum 8000, maximum 10000/)
     expect(screen.getByText('Goal reached')).toBeTruthy()
   })

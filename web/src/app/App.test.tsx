@@ -56,7 +56,7 @@ describe('App', () => {
     api({ '/api/me': json({ error: 'sign in first' }, 401), '/api/setup': json({ needed: false }) })
     renderAt('/health/hrv')
     await screen.findByRole('heading', { name: 'Sign in' })
-    expect(where).toBe('/login?next=%2Fhealth%2Fhrv')
+    await waitFor(() => expect(where).toBe('/login?next=%2Fhealth%2Fhrv')) // the location effect runs after the heading is in
   })
 
   it('offers the setup on a fresh server', async () => {

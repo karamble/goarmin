@@ -2,13 +2,15 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { Repeat } from 'lucide-react'
+import { PersonStanding, Repeat } from 'lucide-react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
 import { useWorkout } from '../../api/hooks/training'
 import type { WorkoutStep } from '../../api/types'
 import { useSectionTitle } from '../../app/section/HeaderSlot'
 import { hm, type Units } from '../../lib/format'
+import { FigureDialog, type FigureItem } from '../../figures/FigureDialog'
 import { blocks, durationText, intensityTone, stepTitle, strip, targetText } from '../../lib/workout'
 import { Card, Kpis, Loaded } from '../health/parts'
 import { sportWords } from './Workouts'
@@ -18,6 +20,7 @@ export default function WorkoutPage() {
   const id = Number(useParams().id)
   const q = useWorkout(id)
   const units = useMe().data?.units ?? 'metric'
+  const [figure, setFigure] = useState<number | null>(null)
   useSectionTitle(q.data?.name)
   if (!(id > 0)) return <NotFound />
   return (
@@ -29,6 +32,11 @@ export default function WorkoutPage() {
         const segs = strip(steps)
         const total = segs.reduce((a, s) => a + (s.s || 60), 0)
         const exercises = new Set(steps.filter((s) => s.exercise).map((s) => s.exercise!.name)).size
+        const figures = figureItems(steps, units)
+        const pose = (s: WorkoutStep) => {
+          const i = s.exercise ? figures.findIndex((f) => f.category === s.exercise!.category && f.number === s.exercise!.number) : -1
+          return i >= 0 ? () => setFigure(i) : undefined
+        }
         return (
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
             <section className="card p-5 sm:p-6">
@@ -51,20 +59,21 @@ export default function WorkoutPage() {
             <Card title="Steps">
               <ol className="m-0 grid list-none gap-2 p-0">
                 {blocks(steps).map((b, i) => b.kind === 'step' ? (
-                  <StepRow key={i} s={b.step} units={units} />
+                  <StepRow key={i} s={b.step} units={units} onPose={pose(b.step)} />
                 ) : (
                   <li key={i} className="rounded-xl border border-border p-2.5">
                     <p className="m-0 mb-2 flex items-center gap-2 px-1 font-mono text-[11px] uppercase tracking-[.14em] text-lime">
                       <Repeat size={13} aria-hidden /> {b.times} times
                     </p>
                     <ol className="m-0 grid list-none gap-2 p-0">
-                      {b.steps.map((s) => <StepRow key={s.index} s={s} units={units} />)}
+                      {b.steps.map((s) => <StepRow key={s.index} s={s} units={units} onPose={pose(s)} />)}
                     </ol>
                   </li>
                 ))}
               </ol>
               <p className="m-0 mt-4 text-[12px] text-faint">As saved on the watch, {new Date(w.recorded_at * 1000).toLocaleDateString()}.</p>
             </Card>
+            {figure !== null && figures.length > 0 && <FigureDialog items={figures} start={figure} onClose={() => setFigure(null)} />}
           </div>
         )
       }}
@@ -72,7 +81,19 @@ export default function WorkoutPage() {
   )
 }
 
-function StepRow({ s, units }: { s: WorkoutStep; units: Units }) {
+/** figureItems is the workout's exercises in order, each once, for the figure dialog. */
+export function figureItems(steps: WorkoutStep[], units: Units): FigureItem[] {
+  const out: FigureItem[] = []
+  for (const s of steps) {
+    const e = s.exercise
+    if (!e || out.some((f) => f.category === e.category && f.number === e.number)) continue
+    const detail = [durationText(s, units), s.weight_kg ? `${s.weight_kg} kg` : ''].filter(Boolean).join(' · ')
+    out.push({ category: e.category, number: e.number, title: e.title || e.name || stepTitle(s), detail })
+  }
+  return out
+}
+
+function StepRow({ s, units, onPose }: { s: WorkoutStep; units: Units; onPose?: () => void }) {
   const target = targetText(s, units)
   return (
     <li className="flex items-start gap-3 rounded-lg bg-bg2 px-3 py-2.5">
@@ -88,6 +109,12 @@ function StepRow({ s, units }: { s: WorkoutStep; units: Units }) {
           </p>
         )}
       </div>
+      {onPose && (
+        <button type="button" onClick={onPose} aria-label={`View pose: ${stepTitle(s)}`}
+          className="inline-flex shrink-0 items-center gap-1 self-center rounded-full border border-border px-2.5 py-1 text-[12px] text-muted hover:border-lime hover:text-lime">
+          <PersonStanding size={14} aria-hidden /> View pose
+        </button>
+      )}
     </li>
   )
 }

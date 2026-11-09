@@ -49,6 +49,9 @@ LISTEN     ?= $(or $(GOARMIN_LISTEN),127.0.0.1:8642)
 DATA       ?= $(or $(GOARMIN_DATA_DIR),$(or $(XDG_DATA_HOME),$(HOME)/.local/share)/goarmin)
 # A Gadgetbridge clone, read by make fitprofile (the community's description of FIT).
 GADGETBRIDGE ?= $(HOME)/go/src/codeberg.org/Freeyourgadget/Gadgetbridge
+# The exercise figures (make figures): Blender and Blender Studio's Human Base Meshes bundle (CC0).
+BLENDER ?= blender
+FIGURES_BUNDLE ?= $(HOME)/goarmin-assets/figures/human-base-meshes-bundle-v1.4.1/human_base_meshes_bundle.blend
 SERVE_ARGS ?= -with-sync
 STATE_DIR  ?= $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/goarmin
 URL        := http://localhost:$(lastword $(subst :, ,$(LISTEN)))
@@ -370,6 +373,15 @@ fuzz: ## Run the fuzz targets for 30 s each
 	$(GO) test -run='^$$' -fuzz=FuzzDecode -fuzztime=30s ./pkg/cobs
 	$(GO) test -run='^$$' -fuzz=FuzzDatasets -fuzztime=30s ./pkg/mtp
 	$(GO) test -run='^$$' -fuzz=FuzzSession -fuzztime=30s ./pkg/mtp
+
+.PHONY: figures
+figures: ## Rebuild the exercise figures (mannequin + every exercise's poses) with Blender (FIGURES_BUNDLE=…, BLENDER=…)
+	@test -f "$(FIGURES_BUNDLE)" || { echo "FIGURES_BUNDLE: $(FIGURES_BUNDLE) not found (Human Base Meshes v1.4.1, CC0)"; exit 1; }
+	@mkdir -p bin
+	$(GO) run ./tools/figures/exercises > bin/figures-exercises.json
+	$(BLENDER) -b --factory-startup --python-exit-code 1 -P tools/figures/blender/build.py -- \
+		--bundle "$(FIGURES_BUNDLE)" --exercises bin/figures-exercises.json \
+		--data internal/figures/data --mesh web/src/figures/assets/mannequin.glb
 
 .PHONY: fitprofile
 fitprofile: ## Regenerate pkg/fitprofile (FIT messages, fields, file types, devices) from the FIT profile and Gadgetbridge's (GADGETBRIDGE=…)

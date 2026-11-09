@@ -257,6 +257,13 @@ describe('watch data', () => {
     expect(screen.getByText('3:53–4:10 /km')).toBeTruthy()
     expect(screen.getByText('Goblet Squat')).toBeTruthy()
     expect(screen.getByText('12 kg · slow')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /^View pose/ })).toHaveLength(1) // only the step with an exercise
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    fireEvent.click(screen.getByRole('button', { name: 'View pose: Goblet Squat' }))
+    expect(screen.getByRole('dialog', { name: 'Goblet Squat' })).toBeTruthy()
+    expect(screen.getByText('12 reps · 12 kg')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('img', { name: /^Intensity over the workout: warmup, active, recovery, active/ })).toBeTruthy()
   })
 

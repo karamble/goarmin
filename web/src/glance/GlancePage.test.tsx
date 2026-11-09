@@ -11,12 +11,14 @@ import GlancePage from './GlancePage'
 
 afterEach(() => vi.unstubAllGlobals())
 
-const day = today()
+const day = today('UTC') // the test account's zone (fixtureMe timezone UTC), not the machine's
 const now = Math.floor(Date.now() / 1000)
-const from = now - 6 * 3600
+// The series lie within today, also in the first hours after midnight.
+const from = Math.max(now - 6 * 3600, Date.parse(`${day}T00:00:00Z`) / 1000)
 
 function series(metric: string, v: number[]) {
-  return { metric, unit: '', total: false, from, to: now, bucket_s: 0, t: v.map((_, i) => from + i * 180), v }
+  const step = Math.max(1, Math.min(180, Math.floor((now - from) / v.length)))
+  return { metric, unit: '', total: false, from, to: now, bucket_s: 0, t: v.map((_, i) => from + i * step), v }
 }
 
 function serve() {

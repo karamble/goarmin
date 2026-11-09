@@ -22,5 +22,6 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 // Testing Library unmounts after each test only with vitest globals; do it explicitly.
 afterEach(() => cleanup())
 
-// Lazy chunks load slower when every test file runs at once; findBy* waits up to 5 s.
-configure({ asyncUtilTimeout: 5000 })
+// Lazy chunks load slower when every test file runs at once on a busy laptop; findBy* waits up
+// to 10 s (the dom tests' own timeout is 15 s, so a missing element is still reported as such).
+configure({ asyncUtilTimeout: 10_000 })

@@ -13,7 +13,7 @@ export default defineConfig({
       { test: { name: 'node', include: ['src/**/*.test.ts'], environment: 'node' } },
       {
         plugins: [react()],
-        // Longer than Testing Library's 5 s wait, so a missing element is reported as such.
+        // Longer than Testing Library's 10 s wait (src/test/setup.ts), so a missing element is reported as such.
         test: { name: 'dom', include: ['src/**/*.test.tsx'], environment: 'jsdom', setupFiles: ['src/test/setup.ts'], testTimeout: 15_000 },
       },
     ],

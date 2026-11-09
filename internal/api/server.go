@@ -171,6 +171,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/totals", s.needUser(s.totals))
 	mux.HandleFunc("GET /api/workouts", s.needUser(s.workouts))
 	mux.HandleFunc("GET /api/workouts/{id}", s.needUser(s.workout))
+	mux.HandleFunc("GET /api/exercises", s.needUser(s.exercises))
+	mux.HandleFunc("GET /api/exercises/{category}/{number}", s.needUser(s.exercise))
 	mux.HandleFunc("GET /api/courses", s.needUser(s.courses))
 	mux.HandleFunc("GET /api/courses/{id}", s.needUser(s.course))
 	mux.HandleFunc("GET /api/courses/{id}/streams", s.needUser(s.courseStreams))

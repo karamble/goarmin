@@ -70,6 +70,7 @@ export const sections: SectionDef[] = [
       { path: 'performance', label: 'Performance', periods: ['all', 'week', 'month', 'year'], defaultPeriod: 'month', load: () => import('../pages/training/Performance') },
       { path: 'coach', label: 'Coach', periods: ['week'], load: () => import('../pages/training/Coach') },
       { path: 'workouts', label: 'Workouts', load: () => import('../pages/training/Workouts'), detail: () => import('../pages/training/Workout') },
+      { path: 'exercises', label: 'Exercises', load: () => import('../pages/training/Exercises') },
       { path: 'courses', label: 'Courses', load: () => import('../pages/training/Courses'), detail: () => import('../pages/training/Course') },
       { path: 'records', label: 'Records', load: () => import('../pages/training/Records') },
       { path: 'gear', label: 'Gear', load: () => import('../pages/training/Gear') },

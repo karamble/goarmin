@@ -127,6 +127,8 @@ https URL makes the cookies `Secure`.
 | `GET /api/activities/{id}/streams` | track columns (`t`, `lat`, `lon`, `alt`, `dist`, `speed`, `hr`, `cad`, `power`, `temp`), gzipped |
 | `GET /api/activities/{id}/fit` | the original file |
 | `GET /api/coach?from&to` | Garmin Coach's suggested workouts |
+| `GET /api/exercises` | the exercise catalogue: every exercise of Garmin's FIT profile with its 3D figure, `{categories: [{name, number, title, count}], exercises: [{key, category, category_num, number, name, title, quality (own, family, category), family, pose, mode (hold, loop)}]}`. The data is built into the server (`make figures`), so the answer carries an `ETag` and `Cache-Control: private, max-age=3600`; `If-None-Match` gets a 304 |
+| `GET /api/exercises/{category}/{number}` | one exercise's figure: `{exercise, parts, keys}`. Each key pose is the root's position followed by a quaternion `[x, y, z, w]` per part in `parts` order, in glTF axes (Y up), for the dashboard's mannequin; a hold has one key, a loop several. 404 for an exercise the profile does not have |
 
 ## Watches
 
