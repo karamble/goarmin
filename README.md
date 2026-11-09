@@ -23,6 +23,8 @@ person in the household. No Garmin account, phone or cloud is needed.
   - Performance over the years: VO2 max, training status, readiness, load, race predictions,
     endurance, hill score.
   - Garmin Coach's plan, the watch's workouts and courses, personal records, gear.
+  - A 3D figure for every exercise a workout can name (1,846): View pose on a workout's steps,
+    and a searchable catalogue under Training › Exercises.
 - **Live.** Heart rate, stress, Body Battery, breathing, steps, calories and floors as the watch
   measures them.
 - **Devices.** Watches, scales and every other device you had:
@@ -38,7 +40,7 @@ person in the household. No Garmin account, phone or cloud is needed.
 | | |
 |---|---|
 | ![Sleep](docs/images/sleep.png) | ![An activity](docs/images/activity.png) |
-| ![Performance](docs/images/performance.png) | |
+| ![Performance](docs/images/performance.png) | ![Exercise figures](docs/images/exercises.png) |
 
 *Screenshots show made-up data.*
 
@@ -103,4 +105,7 @@ or endorsed by Garmin.
 
 ## License
 
-ISC, see [LICENSE](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).
+ISC, see [LICENSE](LICENSE).
+
+The exercise figures use a body from Blender Studio's *Human Base Meshes* (CC0) and are drawn
+with three.js (MIT). Security issues: see [SECURITY.md](SECURITY.md).

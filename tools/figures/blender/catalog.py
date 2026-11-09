@@ -37,6 +37,8 @@ def keys_sig(keys):
 
 def build():
     ex = json.load(open(EXERCISES))
+    if isinstance(ex, dict):  # internal/figures/data/catalog.json carries the same fields
+        ex = ex["exercises"]
     out, errors = {}, []
     for e in ex:
         cat, num, name = e["category"], e["number"], e["name"]

@@ -199,5 +199,5 @@ export default function FigureCanvas({ pose, view, reduced, keyIndex = 0, label 
   // A new exercise or view refits the camera; a key step under reduced motion just redraws.
   useEffect(() => { api.current?.frame() }, [pose, view])
 
-  return <canvas ref={ref} role="img" aria-label={label} className="block aspect-[4/3] w-full touch-none rounded-xl" />
+  return <canvas ref={ref} role="img" aria-label={label} className="block aspect-[4/3] w-full max-w-full touch-none rounded-xl" />
 }

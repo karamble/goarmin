@@ -53,7 +53,7 @@ export function FigureView({ category, number, title }: { category: string; numb
     )
   }
   return (
-    <div className="grid gap-3">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
       {body}
       {webgl && pose && (
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -2,8 +2,8 @@
 # Copyright (c) 2026 karamble
 # Use of this source code is governed by an ISC
 # license that can be found in the LICENSE file.
-"""slim_glb.py IN OUT: keeps only goarmin_part in each node's extras, names nodes by their part,
-drops the generator's unused data. The buffers are left as they are."""
+"""slim_glb.py IN OUT: keeps only goarmin_part in each node's extras, names nodes and meshes by
+their part, drops the generator's unused data. The buffers are left as they are."""
 import json
 import struct
 import sys
@@ -42,7 +42,15 @@ def main(src, dst):
         if part:
             nd["name"] = part
             nd["extras"] = {"goarmin_part": part}
+    # Meshes are named after the part that uses them: Blender's own names carry a .004-style
+    # suffix that depends on how often the body was loaded, which would make the file differ.
+    for nd in j["nodes"]:
+        if "mesh" in nd and nd.get("extras", {}).get("goarmin_part"):
+            m = j["meshes"][nd["mesh"]]
+            if "_named" not in m:
+                m["name"], m["_named"] = nd["extras"]["goarmin_part"], True
     for m in j.get("meshes", []):
+        m.pop("_named", None)
         m.pop("extras", None)
     for s in j.get("scenes", []):
         s.pop("extras", None)

@@ -29,7 +29,7 @@ FIT files have a type in their header. goarmin reads these:
 | 74 | Physiology backup | VO2 max, lactate threshold, FTP, max heart rate snapshots | Training › Performance |
 | 2 | Settings | Clock, units, resting heart rate, sleep window, step lengths, zones, bikes | Devices › a watch › Settings |
 | 3 | Sport profiles | Each profile's heart rate zones | Zones in activities |
-| 5 | Workouts | Steps, repeats, targets, exercises | Training › Workouts |
+| 5 | Workouts | Steps, repeats, targets, exercises (category and number, which pick each exercise's [3D figure](figures.md)) | Training › Workouts |
 | 6 | Courses | Track, course points, laps | Training › Courses |
 | 10 | Totals | Lifetime time, distance, calories and sessions per sport | Activities, Performance |
 | 11 | Goals | Step, floor and intensity goals | Preferences defaults |

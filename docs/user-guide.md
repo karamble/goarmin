@@ -63,8 +63,20 @@ the same numbers.
   ability; *All* shows every year you have.
 - **Coach.** Garmin Coach's plan for the week, with what you did ticked off.
 - **Workouts** and **Courses.**
-  - Workouts: the ones saved on the watch, with their steps, repeats and targets.
+  - Workouts: the ones saved on the watch, with their steps, repeats and targets. A step with an
+    exercise has **View pose**: a 3D figure of the movement in a dialog that steps through the
+    workout's exercises (Previous and Next, or ← and →).
   - Courses: route, elevation profile, course points and the FIT file.
+- **Exercises.** Every exercise a Garmin workout can name (1,846), by category, with a search.
+  - Pick one to see its figure: a see-through mannequin that holds the pose or moves through it.
+  - Drag to turn it, or use ¾, Front, Side, Back and Top.
+  - *Posed for this exercise* marks a figure made for that exercise. *Shared with similar
+    movements* means it shows the movement without the equipment (a dumbbell lunge looks like a
+    lunge).
+  - With reduced motion on, the figure stands still and arrows step through its key poses.
+  - How the figures are made: [figures.md](figures.md).
+
+  ![Training › Exercises](images/exercises.png)
 - **Records** and **Gear.**
   - Records: your personal records, linked to their activities.
   - Gear: shoes and bikes, with the distance used against their limit.

@@ -2,8 +2,8 @@
 # Use of this source code is governed by an ISC
 # license that can be found in the LICENSE file.
 # goarmin figures: review renders. Each pose renders twice (¾ from the front left, and from the
-# figure's left side), framed automatically, in solid lime so the pose reads clearly. Contact
-# sheets are put together with ImageMagick outside Blender.
+# figure's left side), framed automatically, in solid lime so the pose reads clearly (Workbench or
+# EEVEE; session.py sets the scene up). tools/figures/sheets.py puts them on contact sheets.
 import math
 import os
 
@@ -25,6 +25,7 @@ def review_materials():
         c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
         bsdf.inputs["Base Color"].default_value = [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c] + [1]
         bsdf.inputs["Roughness"].default_value = 0.6
+        m.diffuse_color = bsdf.inputs["Base Color"].default_value[:]  # what Workbench shows
     for o in parts(BODY).values():
         p = o["goarmin_part"]
         side = "L" if p.endswith(".L") else "R" if p.endswith(".R") else "C"

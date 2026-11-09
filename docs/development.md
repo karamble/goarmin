@@ -6,7 +6,7 @@ watch protocol in [docs/protocol](protocol/README.md), the HTTP API in [api.md](
 ## Setup
 
 ```sh
-make check-tools   # go 1.27.3, node, npm, sqlite3, GNU time
+make check-tools   # go 1.27.3, node, npm, sqlite3, GNU time (optional: Blender, ImageMagick)
 make web-deps      # the dashboard's npm packages
 make build         # dashboard into internal/webui/dist, then bin/goarmin with it embedded
 make check         # gofmt, go vet, Go tests, the dashboard's type check and tests
@@ -21,13 +21,16 @@ make check         # gofmt, go vet, Go tests, the dashboard's type check and tes
 | `make tools` | `snoopdecode` (Bluetooth captures), `fitinspect`, `devseed`, `fitprofilegen`, `wellnessdump` into `bin/` |
 | `make docker-image`, `make docker-dev-up` | The container image, tried on a scratch copy |
 | `make bench-import FILE=export.zip` | Time an import on a throwaway copy of your data |
+| `make figures` | Rebuild the exercise figures with Blender ([figures.md](figures.md)); only needed when you change a pose |
 
 ## Rules the code follows
 
 - **Tests never hardcode dates.** No `time.Date(2026, …)`, no date strings or epoch constants in
   tests or fixtures. Take `now := time.Now()` once, derive every value from it, and inject the
   clock (`pkg/clock`, `Store.SetClock`). A guard test fails on literals, the web tests
-  included.
+  included. Fixtures must also hold on every weekday and at every hour: anchor week views to a
+  past week, and "today" to the test account's zone (UTC). Ranges such as "the last three days"
+  or "six hours ago" otherwise cross a Monday or midnight.
 - **goarmin's own HTTP requests never identify us.** They send a regular browser User-Agent
   (`pkg/httpx.BrowserUA`), and `pkg/httpx` is the only place an `http.Client` is made (a guard
   test checks). Developer tools (go, npm, apk, docker, git) keep their own defaults.
@@ -64,6 +67,10 @@ make check         # gofmt, go vet, Go tests, the dashboard's type check and tes
   run against it.
 - **Capture replay.** `GOARMIN_CAPTURE=~/goarmin-captures/…` replays a real Bluetooth capture
   in the codec tests (opt-in; captures stay out of the repository).
+- **Exercise figures in tests.** jsdom draws nothing, so the figure tests mock
+  `HTMLCanvasElement.getContext` and check the dashboard's no-WebGL note. three.js never loads in
+  a test; a guard keeps it to `web/src/figures/FigureCanvas.tsx`. devseed's strength workout
+  names real exercises, so *View pose* shows their figures on a scratch server.
 - **Inspecting files.** `go run ./tools/fitinspect FILE…` prints every message of a FIT file;
   **Devices › Files › Inspect** does the same in the dashboard.
 
@@ -98,6 +105,10 @@ and document it in [api.md](api.md).
   at most one lime series, with a table and an aria description.
 - A new top-level section also goes into `internal/webui.Routes` (a test checks they match).
 
+**An exercise figure.** Pose one exercise in `tools/figures/blender/own.py`, change a family or a
+rule in `families.py`, check it in Blender with `tools/figures/blender/session.py`, then
+`make figures` and commit the scripts with the generated files. See [figures.md](figures.md).
+
 **The FIT profile.** `make fitprofile` regenerates `pkg/fitprofile` from the official profile
 (through `github.com/muktihari/fit`) and Gadgetbridge's community profile
 (`GADGETBRIDGE=path/to/clone`).
@@ -118,6 +129,7 @@ internal/
   nodeclient/      a sync node: sign-in, the Remote backend, the daemon (goarmin sync -server)
   nodeproto/       what a node and the server send each other
   backup/          backup archives
+  figures/         the exercise figures' catalogue and poses (generated, embedded)
   guard/           repository-wide checks (no fixed dates in tests, no raw HTTP clients, …)
   tiles/, webui/, usbsource/, config/
 pkg/
@@ -131,10 +143,12 @@ web/src/
   app/             shell, routes, section header, date navigator, palette
   api/             typed client, TanStack Query hooks
   charts/          the chart library (ECharts)
+  figures/         the exercise figures (three.js, the mannequin mesh)
   glance/          the customizable board
   pages/           health, training, live, devices, settings, auth
   map/, ui/, lib/, theme/
-tools/             snoopdecode, fitinspect, devseed, fitprofilegen, wellnessdump
+tools/             snoopdecode, fitinspect, devseed, fitprofilegen, wellnessdump;
+                   figures/ (the Blender pipeline for the exercise figures)
 docs/              these documents, the API, the protocol notes
 docker/            the server image and compose files
 ```

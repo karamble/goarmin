@@ -67,10 +67,11 @@ flowchart LR
   - `nodehub` is the sync role: schedule, Bluetooth lane, live links, pairing sessions.
   - `syncnode` is one sync, plus the spool.
   - `api` serves HTTP; `webui` is the embedded dashboard.
+  - `figures` holds the exercise figures' catalogue and poses, built into the binary.
   - `tiles` mounts the tile cache; `backup` writes archives; `usbsource` finds watches on USB;
     `config` reads settings.
-- `web/` is the dashboard source (React).
-- `tools/` holds developer tools.
+- `web/` is the dashboard source (React); `web/src/figures` draws the exercise figures.
+- `tools/` holds developer tools; `tools/figures` is the Blender pipeline for the figures.
 
 ## The sync
 
@@ -350,6 +351,26 @@ flowchart LR
   `internal/webui/dist`, which is embedded in the binary. Only the dashboard's own routes get
   `index.html`.
 - [api.md](api.md) lists every route.
+
+## Exercise figures
+
+Each exercise of the FIT profile has a 3D figure: a see-through mannequin in one key pose, or
+looping through several.
+
+- **Made offline.** The figures are built in Blender (`make figures`, the scripts in
+  `tools/figures`). The server embeds the result (`internal/figures`: catalogue and poses), and
+  the dashboard embeds the mesh (`web/src/figures/assets/mannequin.glb`).
+- **Served.** `/api/exercises` lists the catalogue, and `/api/exercises/{category}/{number}`
+  gives one exercise's key poses. Both are cached privately and revalidated by ETag, because the
+  data changes only with a new binary.
+- **Drawn.**
+  - three.js loads in its own chunk with the first figure. It sets each part's rotation from the
+    key poses and blends between them.
+  - A dialog holds the page's only WebGL context while it is open and gives it back on close; the
+    figure pauses off screen.
+- Workout steps carry the exercise's category and number, which select its figure.
+
+Details, the pose language and how to change a figure: [figures.md](figures.md).
 
 ## What leaves the machine
 

@@ -149,10 +149,10 @@ func seedWatch(ctx context.Context, st *store.Store, user int64, now time.Time) 
 			{Index: 4, Intensity: "cooldown", Duration: "open", Notes: "Easy until you press Lap"},
 		}}},
 		"workout-strength": {Workout: &fitwatch.Workout{Name: "Core 20", Sport: "training", SubSport: "strength_training", Steps: []fitwatch.Step{
-			{Index: 0, Intensity: "warmup", Duration: "time", DurationValue: 120, Exercise: &fitwatch.Exercise{Category: "warm_up", Name: "Jumping Jacks"}},
+			{Index: 0, Intensity: "warmup", Duration: "time", DurationValue: 120, Exercise: &fitwatch.Exercise{Category: "cardio", Name: "Jumping Jacks", Number: 12}},
 			{Index: 1, Intensity: "active", Duration: "reps", DurationValue: 15, Exercise: &fitwatch.Exercise{Category: "crunch", Name: "Bicycle Crunch"}},
-			{Index: 2, Intensity: "active", Duration: "time", DurationValue: 45, Exercise: &fitwatch.Exercise{Category: "plank", Name: "Plank"}},
-			{Index: 3, Intensity: "active", Duration: "reps", DurationValue: 10, WeightKg: 12, Exercise: &fitwatch.Exercise{Category: "squat", Name: "Goblet Squat"}},
+			{Index: 2, Intensity: "active", Duration: "time", DurationValue: 45, Exercise: &fitwatch.Exercise{Category: "plank", Name: "Plank", Number: 43}},
+			{Index: 3, Intensity: "active", Duration: "reps", DurationValue: 10, WeightKg: 12, Exercise: &fitwatch.Exercise{Category: "squat", Name: "Goblet Squat", Number: 37}},
 			{Index: 4, Intensity: "rest", Duration: "time", DurationValue: 60, Notes: "Shake it out"},
 			{Index: 5, Duration: "repeat", From: 1, Repeat: 3},
 		}}},

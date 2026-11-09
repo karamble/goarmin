@@ -45,3 +45,6 @@ goarmin_backup_*.tar.gz
 *.swp
 *~
 .claude/settings.local.json
+
+# Python bytecode (tools/figures runs inside Blender)
+__pycache__/

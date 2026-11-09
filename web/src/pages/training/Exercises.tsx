@@ -72,9 +72,9 @@ export default function Exercises() {
                 {groups.map(([c, items]) => (
                   <div key={c} className="mb-3">
                     {!category && <h3 className="m-0 mb-1 font-mono text-[11px] uppercase tracking-[.14em] text-faint">{titles[c] ?? c}</h3>}
-                    <ul className="m-0 grid list-none gap-0.5 p-0">
+                    <ul className="m-0 grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 p-0">
                       {items.map((e) => (
-                        <li key={e.key}>
+                        <li key={e.key} className="min-w-0">
                           <button type="button" onClick={() => set('ex', e.key)} aria-current={current?.key === e.key ? 'true' : undefined}
                             className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[14px] ${current?.key === e.key ? 'bg-bg2 text-lime' : 'text-text hover:bg-bg2'}`}>
                             <span className="min-w-0 flex-1 truncate">{e.title}</span>

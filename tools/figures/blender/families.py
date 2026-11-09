@@ -708,7 +708,6 @@ def f_bridge(c, single=False, march=False):
         return [hi]
     if single:
         ext = {"leg_upper.R": (V(B, 1, U, .2), U), "leg_lower.R": (V(B, 1, U, .2), U), "foot.R": (V(B, 1, U, .6), U)}
-        lo = P("supine", pelvis=(-12, 0, 0), aim={**{k: v for k, v in hi.items()}, **{}}) if False else lo
         lo2 = dict(bridge(0.3)); lo2.update({k: v for k, v in ext.items()})
         hi2 = dict(bridge(1.0)); hi2.update({k: v for k, v in ext.items()})
         return [lo2, hi2]
@@ -1091,7 +1090,7 @@ def f_side_plank(c, kind="std"):
                  contacts=("forearms.L", "feet.L"))
         return [base, tuck]
     if kind == "rotate":
-        return [plank_high(), USER["move/34"][1][1] if False else base]
+        return [plank_high(), base]
     if kind == "t":
         return [plank_high(), f_push_up(c, "t")[-1]]
     return [base]
@@ -1114,14 +1113,6 @@ def f_two_point(c):
 def f_spiderman_plank(c):
     k = plank_fore(LL={"flex": 90, "abd": 60, "knee": 100}, aim={"foot.L": (B, D)})
     return [k, mirror(k)]
-
-
-def f_plank_to_stand(c):
-    return [plank_high(), USER["pose/37"][1][0] if False else f_burpee(c)[1], P(aim=DOWN)]
-
-
-def f_plank_hold(c, forearm=True):
-    return [plank_fore()] if forearm else [plank_high()]
 
 
 # --- Whole body, jumps and cardio ---
@@ -1177,8 +1168,7 @@ def stride(s=1.0, lean=5, arms=True, knee_up=0):
     if arms:
         fa = {"arm_upper": (V(D, 1, F, .5 * s, LT, .05), F), "arm_lower": (V(F, 1, U, .4 * s, RT, .2), B), "hand": (V(F, 1, U, .3), RT)}
         ba = {"arm_upper": (V(D, 1, B, .45 * s, RT, .05), F), "arm_lower": (V(D, .4, F, 1, LT, .1), B), "hand": (V(F, 1, D, .2), LT)}
-        a = {**one("R", {k: (v[0], v[1]) for k, v in fa.items()}), **one("L", ba)}
-        a = {**{f"{k}.R": (mirror_vec(v[0]) if False else v[0], v[1]) for k, v in fa.items()}, **{f"{k}.L": v for k, v in ba.items()}}
+        a = {**one("R", fa), **one("L", ba)}
     return P(pelvis=(lean, 0, 0), LL=front, RL=back, aim=a)
 
 
@@ -1223,10 +1213,6 @@ def f_stepper(c, handles=True):
     a = sym(lambda lat: {"arm_upper": (V(D, 1, F, .3, lat, .1), F), "arm_lower": (V(F, 1, U, .2), U), "hand": (F, U)}) if handles else DOWN
     k = P(LL=lw(0, 55, 10), aim=a)
     return [k, mirror(k)]
-
-
-def f_climb(c):
-    return f_rope_climb(c)
 
 
 def f_carry(c, arms="down", toes=False):
@@ -1310,8 +1296,7 @@ def f_battle_rope(c, kind="alt"):
     if kind == "kneel":
         return [K(kneel(), {"aim": arms_alt(hi, lo)}), K(b, {"aim": arms_alt(lo, hi)})]
     if kind == "side_plank":
-        sp = dict(USER["plank/66"][1][0]); sp.update(one("R", limb(V(F, 1, RT, .5), sec=U)) if False else {})
-        return [sp]
+        return [dict(USER["plank/66"][1][0])]
     if kind == "uppercut":
         k = K(b, {"spine": (0, 0, 20), "aim": arms_alt(sym(lambda lat: {"arm_upper": (V(F, 1, D, .3), U), "arm_lower": (V(U, 1, F, .3), B), "hand": (U, B)}), GUARD)})
         return [K(b, {"aim": GUARD}), k, K(b, {"aim": GUARD}), mirror(k)]
@@ -1397,7 +1382,7 @@ def f_seated_arms(c, kind="raise"):
 def f_seated_spine(c, kind="flex"):
     b = chair()
     if kind == "flex":  # seated cat cow
-        return [K(b, {"spine": (30, 0, 0), "neck": (20, 0, 0), "aim": HANDS_HIPS if False else sym(lambda lat: limb(V(D, 1, F, .6), sec=F))}),
+        return [K(b, {"spine": (30, 0, 0), "neck": (20, 0, 0), "aim": sym(lambda lat: limb(V(D, 1, F, .6), sec=F))}),
                 K(b, {"spine": (-20, 0, 0), "neck": (-20, 0, 0), "aim": sym(lambda lat: limb(V(D, 1, F, .6), sec=F))})]
     if kind == "rotation":
         k = K(b, {"spine": (0, 0, 45), "aim": PRAYER})
@@ -1515,8 +1500,7 @@ def yoga(name):
                                                     "leg_upper.L": (V(LT, 1, D, .6), F), "leg_lower.L": (V(LT, 1, D, .6), F), "foot.L": (V(LT, 1, F, .3), U),
                                                     **one("L", limb(V(D, 1, LT, .5), sec=F)), **one("R", limb(V(U, 1, LT, .8), sec=F))},
                            contacts=("feet.L", "knees.R", "y"))],
-        "mermaid": lambda: [seated(spine=(0, 30, 0), aim={**USER["warm_up/74"][1][0], **arms_alt(sym(lambda lat: limb(V(D, 1, lat, .3), sec=F)), OVERHEAD)})
-                            if False else P(spine=(0, 30, 0), legs={"flex": 90}, aim={**{k: v for k, v in USER["warm_up/74"][1][0].items() if k.startswith(("leg", "foot"))},
+        "mermaid": lambda: [P(spine=(0, 30, 0), legs={"flex": 90}, aim={**{k: v for k, v in USER["warm_up/74"][1][0].items() if k.startswith(("leg", "foot"))},
                                                                                       **one("L", limb(V(D, 1, LT, .3), sec=F)), **one("R", limb(V(U, 1, LT, .7), sec=F))})],
         "bound_angle": lambda: [P(legs={"flex": 85, "abd": 50, "rot": 50, "knee": 130, "ankle": 10}, aim=sym(lambda lat: limb(V(D, 1, F, .6), sec=F)))],
         "easy_seated": lambda: [seated(aim=sym(lambda lat: limb(V(D, 1, F, .35, lat, .5), sec=F)), **CROSS_LEGS)],
@@ -1626,8 +1610,7 @@ def stretch(name):
         "inverted_hamstring": lambda: [P(pelvis=(85, 0, 0), LL=lw(85, 12, 0), RL={"flex": 5, "ankle": 30}, aim=T_ARMS)],
         "reach_roll_lift": lambda: [USER["pose/11"][1][0], P(aim={**{k: v for k, v in USER["pose/11"][1][0].items() if not k.startswith(("arm_upper.L", "arm_lower.L", "hand.L"))},
                                                                  **one("L", limb(V(F, 1, U, .4), sec=U))})],
-        "thoracic_rotation": lambda: [quad(spine=(0, 0, 40), aim={"arm_upper.L": (V(LT, 1, U, .7), D), "arm_lower.L": (V(RT, 1, U, .4, F, .3), D), "hand.L": (RT, D)},
-                                           ) if False else quad(spine=(0, 0, 40), aim={"arm_upper.L": (V(LT, 1, U, .7), D), "arm_lower.L": (V(RT, 1, U, .4, F, .3), D), "hand.L": (RT, D)})],
+        "thoracic_rotation": lambda: [quad(spine=(0, 0, 40), aim={"arm_upper.L": (V(LT, 1, U, .7), D), "arm_lower.L": (V(RT, 1, U, .4, F, .3), D), "hand.L": (RT, D)})],
         "windshield": lambda: [P("supine", pelvis=(0, 0, 40), spine=(0, 0, -40), legs={"flex": 90, "ankle": 20}, aim=sym(lambda lat: limb(lat, sec=U))),
                                mirror(P("supine", pelvis=(0, 0, 40), spine=(0, 0, -40), legs={"flex": 90, "ankle": 20}, aim=sym(lambda lat: limb(lat, sec=U))))],
         "frog": lambda: [P("prone", aim={**FOREARM, **sym(lambda lat: {"leg_upper": (V(lat, 1, D, .7), F), "leg_lower": (B, D), "foot": (B, D)})}, contacts=("forearms", "knees"))],
@@ -1979,7 +1962,7 @@ RULES = [
     ("", r"(oblique|side_crunch|cross_crunch|elbow_to_knee|side_to_side_crunch|skater_crunch|crunch_chop)", lambda c: f_crunch(c, twist=25), "crunch_twist"),
     ("", r"(raised_legs_crunch|double_crunch)", lambda c: f_crunch(c, legs="table"), "crunch_table"),
     ("", r"straight_leg_crunch|leg_climb", lambda c: f_crunch(c, legs="up"), "crunch_legs_up"),
-    ("", r"(standing.*crunch|standing_side_crunch)", lambda c: [P(aim=behind_head_aim() if False else BEHIND_HEAD), P(RL=lw(0, 85, 0), spine=(20, 0, -20), aim=BEHIND_HEAD)], "standing_crunch"),
+    ("", r"(standing.*crunch|standing_side_crunch)", lambda c: [P(aim=BEHIND_HEAD), P(RL=lw(0, 85, 0), spine=(20, 0, -20), aim=BEHIND_HEAD)], "standing_crunch"),
     ("", r"kneeling.*crunch", lambda c: [K(kneel(), {"aim": sym(lambda lat: {"arm_upper": (V(U, 1, F, .3, lat, .3), F), "arm_lower": (V(-lat, 1, B, .2, D, .2), F), "hand": (V(-lat), F)})}),
                                           K(kneel(), {"pelvis": (25, 0, 0), "spine": (50, 0, 0), "aim": sym(lambda lat: {"arm_upper": (V(F, 1, D, .6, lat, .3), F), "arm_lower": (V(-lat, 1, B, .3, U, .2), F), "hand": (V(-lat), F)})})], "kneeling_crunch"),
     ("", r"crunch|curl_up", lambda c: f_crunch(c), "crunch"),
@@ -1988,7 +1971,7 @@ RULES = [
     ("", r"(reverse_leg_raise|reverse_hip_raise|bent_knee_reverse_hyper|single_leg_back_extension)", lambda c: [P("prone", aim=FOREARM), P("prone", legs={"flex": -25, "ankle": 60}, aim=FOREARM)], "reverse_hyper"),
     ("", r"(back_extension|hyperextension|spine_extension|ghd_back)", lambda c: f_superman(c, hands="head"), "back_extension"),
     ("", r"(side_bend|oblique_twist|body_bar_oblique)", f_side_bend, "side_bend"),
-    ("", r"(rollout|ab_wheel|slide_out|alternating_slide_out)", lambda c: f_rollout(c, kneeling="barbell" not in c.name or True), "rollout"),
+    ("", r"(rollout|ab_wheel|slide_out|alternating_slide_out)", lambda c: f_rollout(c), "rollout"),
     ("", r"l_sit", lambda c: f_lsit(c), "l_sit"),
     ("", r"front_lever", lambda c: f_hollow(c), "hollow"),
     # --- hips ---
@@ -2022,7 +2005,7 @@ STRETCH_RULES = [
     (r"stretch_forearms", "forearms"), (r"front_split|full_split", "front_split"), (r"hip_flexor_and_quad", "hip_flexor_quad"),
     (r"stretch_lat", "lat"), (r"lying_abduction", "lying_abduction"), (r"lying_it_band", "lying_it_band"), (r"(lying_knee_to_chest|back_massage)", "lying_knee_to_chest"),
     (r"(stretch_obliques|stretch_side$|standing_side_stretch|lateral_flexion|standing_side_opener)", "side"), (r"over_under", "over_under"),
-    (r"(pectoral|chest_and_shoulder)", "pectoral" if True else "wall_chest"), (r"pigeon|hip_stretch", "pigeon"), (r"stretch_quad", "quad"),
+    (r"(pectoral|chest_and_shoulder)", "pectoral"), (r"pigeon|hip_stretch", "pigeon"), (r"stretch_quad", "quad"),
     (r"stretch_shoulder", "shoulder_cross"), (r"(side_split|straddle)", "straddle"), (r"standing_it_band", "standing_it_band"),
     (r"triceps_stretch|stretch_triceps", "triceps"), (r"half_kneeling_arm_rotation", "half_kneel_rotation"), (r"active_frog", "frog"),
     (r"back_roll_foam", "foam_back"), (r"latissimus_dorsi_foam", "foam_lat"), (r"reverse_t_hip", "reverse_t"), (r"upper_back_stretch", "upper_back"),
@@ -2079,7 +2062,7 @@ CATEGORY_RULES = {
                     (r"split_jack", lambda c: f_jumping_jack(c, "split"), "split_jacks"), (r"jump", lambda c: f_box_jump(c), "box_jump"),
                     (r"", lambda c: f_battle_rope(c), "rope_wave")],
     "suspension": [(r"chest_fly", lambda c: f_flye(c, True), "flye_standing"), (r"chest_press", f_chest_press_standing, "chest_press_standing"),
-                   (r"^crunch", lambda c: f_reverse_crunch(c) if False else f_mountain_climber(c), "mountain_climber"), (r"curl", f_curl, "curl"),
+                   (r"^crunch", f_mountain_climber, "mountain_climber"), (r"curl", f_curl, "curl"),
                    (r"glute_bridge|hip_drop", lambda c: f_bridge(c), "bridge"), (r"hamstring_curl", f_leg_curl, "leg_curl"),
                    (r"knee_drive_jump", lambda c: f_high_knees(c), "high_knees"), (r"knee_to_chest|^mountain_climber|reverse_mountain", f_mountain_climber, "mountain_climber"),
                    (r"lat_pullover", lambda c: f_pulldown(c, True), "straight_arm_pulldown"), (r"pendulum", lambda c: f_side_plank(c), "side_plank"),
