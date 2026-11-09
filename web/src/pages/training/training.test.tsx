@@ -230,7 +230,7 @@ describe('watch data', () => {
   const workout = {
     id: 4, name: '6 × 400 m', sport: 'running', sub_sport: 'generic', estimated_s: 1830, step_count: 5, exercise_count: 1, recorded_at: now - 86400,
     origin: 'watch', origins: ['watch', 'garmin_connect'], description: 'Short and fast',
-    watches: [{ device_id: 7, name: 'Fenix 8', state: 'on', since: now - 600, checked_at: now - 600 }],
+    watches: [{ device_id: 7, name: 'Fenix 8', state: 'on', since: now - 600, checked_at: now - 600, want: true }],
     versions: [{ id: 4, origin: 'watch', device_id: 7, recorded_at: now - 86400, step_count: 5 }, { id: 9, origin: 'garmin_connect', device_id: 0, recorded_at: now - 2 * 86400, step_count: 5 }],
     steps: [
       { index: 0, intensity: 'warmup', duration: 'time', duration_value: 600, target: 'heart_rate', target_zone: 2 },
@@ -294,6 +294,26 @@ describe('watch data', () => {
     expect(screen.getByText('Edited in goarmin, from a watch and Garmin Connect')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Back to the original' }))
     await waitFor(() => expect(calls().some(([u, init]) => u.endsWith('/api/workouts/12') && init?.method === 'DELETE')).toBe(true))
+  })
+
+  it('switches a workout on for a watch, and says what happens next', async () => {
+    const off = { ...workout, watches: [{ device_id: 7, name: 'Fenix 8', state: 'removed', since: now - 600, checked_at: now - 600, want: false }] }
+    const sending = { ...workout, watches: [{ ...off.watches[0], want: true, pending: 'send' }] }
+    let shown: object = off
+    const fn = stubApi({
+      '/api/workouts/4': () => json(shown)(),
+      '/api/workouts/4/watches/7': () => { shown = sending; return json(sending)() },
+    })
+    const calls = () => fn.mock.calls as unknown as [string, RequestInit | undefined][]
+    page(<Workout />, '/training/workouts/4', '/training/workouts/:id')
+    const sw = await screen.findByRole('switch', { name: 'On Fenix 8' })
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText('Not on the watch. Switch it on to send it at the next sync.')).toBeTruthy()
+    fireEvent.click(sw)
+    await waitFor(() => expect(calls().some(([u, init]) => u.endsWith('/api/workouts/4/watches/7') && init?.method === 'PUT')).toBe(true))
+    expect(JSON.parse(String(calls().find(([, init]) => init?.method === 'PUT')![1]!.body))).toEqual({ on: true })
+    expect(await screen.findByText('Goes on the watch at its next sync.')).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'On Fenix 8' }).getAttribute('aria-checked')).toBe('true')
   })
 
   it('is a library: every workout with where it is, searchable and filtered', async () => {

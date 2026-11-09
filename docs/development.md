@@ -131,6 +131,7 @@ internal/
   nodes/           the server's sync nodes: who syncs which watch, commands, live relay
   nodeclient/      a sync node: sign-in, the Remote backend, the daemon (goarmin sync -server)
   nodeproto/       what a node and the server send each other
+  outbox/          what a watch gets from the workout library at its next sync
   backup/          backup archives
   figures/         the exercise figures' catalogue and poses (generated, embedded)
   guard/           repository-wide checks (no fixed dates in tests, no raw HTTP clients, …)

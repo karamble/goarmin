@@ -43,6 +43,8 @@ var Excluded = map[string]string{
 	"POST /api/node/v1/runs":               "spoken by sync nodes, not people",
 	"POST /api/node/v1/inventory":          "spoken by sync nodes, not people",
 	"GET /api/node/v1/history":             "spoken by sync nodes, not people",
+	"GET /api/node/v1/outbox":              "spoken by sync nodes, not people",
+	"POST /api/node/v1/sent":               "spoken by sync nodes, not people",
 	"POST /api/node/v1/progress":           "spoken by sync nodes, not people",
 	"GET /api/node/v1/commands":            "spoken by sync nodes, not people",
 	"POST /api/node/v1/commands/{id}":      "spoken by sync nodes, not people",

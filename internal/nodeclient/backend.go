@@ -194,6 +194,34 @@ func (r *Remote) Inventory(ctx context.Context, w nodehub.Watch, inv syncnode.In
 	return err
 }
 
+// Outbox implements nodehub.Outboxer: the server says what to push. A server without the
+// route (older) has nothing to send.
+func (r *Remote) Outbox(ctx context.Context, w nodehub.Watch) ([]syncnode.Outgoing, error) {
+	res, err := r.c.Outbox(ctx, w.Unit)
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status == http.StatusNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []syncnode.Outgoing
+	for _, f := range res.Files {
+		out = append(out, syncnode.Outgoing{Key: f.Key, Type: f.Type, Data: f.Data, Announce: f.Announce})
+	}
+	return out, nil
+}
+
+// Sent implements nodehub.Outboxer.
+func (r *Remote) Sent(ctx context.Context, w nodehub.Watch, sent []syncnode.SendOutcome, at time.Time) error {
+	req := nodeproto.SentRequest{Unit: w.Unit, At: at}
+	for _, x := range nodehub.Results(sent) {
+		req.Results = append(req.Results, nodeproto.SentResult{Key: x.Key, SHA256: x.SHA256, UID: x.UID, Error: x.Err,
+			Refused: x.Refused, Unsupported: x.Unsupported})
+	}
+	return r.c.Sent(ctx, req)
+}
+
 // flush sends the sync runs the server missed.
 func (r *Remote) flush(ctx context.Context) {
 	r.mu.Lock()

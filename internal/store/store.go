@@ -137,6 +137,9 @@ type Device struct {
 	Paused bool
 	// DeleteSupport is whether the watch deletes files on request: "", "yes" or "no".
 	DeleteSupport string
+	// SendSupport is whether the watch takes files goarmin pushes (workouts): "", "yes" or
+	// "no".
+	SendSupport string
 	// USBAuto imports the watch when it is plugged in by USB; USBSerial is the serial it reports
 	// there ('' until a USB import learns it).
 	USBAuto   bool
@@ -273,11 +276,11 @@ func (s *Store) HadOtherOwner(ctx context.Context, device, user int64) (bool, er
 
 // deviceCols are a device's columns in scanDevice order.
 const deviceCols = `d.id, d.unit_id, d.product, d.name, d.firmware, d.address, d.after_fetch, d.nickname,
-	COALESCE(d.battery, -1), COALESCE(d.battery_at, 0), d.paused, d.delete_support, d.usb_auto, d.usb_serial, d.kind`
+	COALESCE(d.battery, -1), COALESCE(d.battery_at, 0), d.paused, d.delete_support, d.usb_auto, d.usb_serial, d.kind, d.send_support`
 
 func deviceDest(d *Device, batteryAt *int64) []any {
 	return []any{&d.ID, &d.UnitID, &d.Product, &d.Name, &d.Firmware, &d.Address, &d.AfterFetch, &d.Nickname,
-		&d.Battery, batteryAt, &d.Paused, &d.DeleteSupport, &d.USBAuto, &d.USBSerial, &d.Kind}
+		&d.Battery, batteryAt, &d.Paused, &d.DeleteSupport, &d.USBAuto, &d.USBSerial, &d.Kind, &d.SendSupport}
 }
 
 func scanDevice(row interface{ Scan(...any) error }, extra ...any) (Device, error) {
@@ -465,6 +468,7 @@ const (
 	StartedByManual   = "manual"
 	StartedByWizard   = "wizard"
 	StartedByDelete   = "delete"
+	StartedByLibrary  = "library" // a workout switched on for the watch
 )
 
 // RecordSyncRun appends to the sync log.

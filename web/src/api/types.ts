@@ -320,6 +320,14 @@ export interface WorkoutWatch {
   since?: number
   /** When the watch last listed its workouts (absent: not yet). */
   checked_at?: number
+  /** Whether it belongs on this watch: the library's switch, or (never switched) whether the
+   * watch has it. */
+  want: boolean
+  /** What the next sync does: send it, or nothing while it waits to be deleted on the watch
+   * (remove; goarmin cannot delete from a watch). */
+  pending?: 'send' | 'remove'
+  /** Why the last try to send it failed. */
+  failed?: string
 }
 
 export interface WorkoutVersion {
@@ -558,7 +566,7 @@ export interface Setting<T = unknown> {
 /** A run in the sync log (GET /api/sync-runs). */
 export interface LogRun extends SyncRun {
   device_id: number
-  started_by: 'schedule' | 'manual' | 'wizard' | 'delete'
+  started_by: 'schedule' | 'manual' | 'wizard' | 'delete' | 'library'
   listed: number
   failed: number
   error_code: string

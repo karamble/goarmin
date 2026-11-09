@@ -22,6 +22,7 @@ import (
 	"github.com/karamble/goarmin/internal/nodehub"
 	"github.com/karamble/goarmin/internal/nodeproto"
 	"github.com/karamble/goarmin/internal/nodes"
+	"github.com/karamble/goarmin/internal/outbox"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/auth"
 )
@@ -47,6 +48,8 @@ func (s *Server) routesNode(mux *router) {
 	mux.HandleFunc("POST "+p+"/runs", s.needNode(s.nodeRun))
 	mux.HandleFunc("POST "+p+"/inventory", s.needNode(s.nodeInventory))
 	mux.HandleFunc("GET "+p+"/history", s.needNode(s.nodeHistory))
+	mux.HandleFunc("GET "+p+"/outbox", s.needNode(s.nodeOutbox))
+	mux.HandleFunc("POST "+p+"/sent", s.needNode(s.nodeSent))
 	mux.HandleFunc("POST "+p+"/progress", s.needNode(s.nodeProgress))
 	mux.HandleFunc("GET "+p+"/commands", s.needNode(s.nodeCommands))
 	mux.HandleFunc("POST "+p+"/commands/{id}", s.needNode(s.nodeResult))
@@ -412,6 +415,64 @@ func (s *Server) nodeInventory(w http.ResponseWriter, r *http.Request, nc nodeCt
 		inv.Items = append(inv.Items, store.InventoryItem{UID: it.UID, Type: it.Type, Size: it.Size})
 	}
 	if err := s.st.SetWatchInventory(r.Context(), dev.ID, inv); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// nodeOutbox answers what a node should push to a watch at its sync: the workouts its owner's
+// library wants on it.
+func (s *Server) nodeOutbox(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	unit, err := strconv.ParseUint(r.URL.Query().Get("unit"), 10, 32)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "unit is a number")
+		return
+	}
+	dev, ok := s.nodeDevice(w, r, nc, uint32(unit))
+	if !ok {
+		return
+	}
+	out := nodeproto.OutboxResponse{Files: []nodeproto.OutboxFile{}}
+	owner, err := nodehub.OwnerNow(r.Context(), s.st, dev)
+	if err != nil || owner == 0 {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	files, err := outbox.Build(r.Context(), s.st, s.blobs, owner, dev.ID)
+	if err != nil {
+		s.log.Warn("api: a workout for the watch cannot be written", "device", dev.ID, "err", err)
+	}
+	for _, f := range files {
+		out.Files = append(out.Files, nodeproto.OutboxFile{Key: f.Key, Type: f.Type, Data: f.Data, Announce: f.Announce})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// nodeSent records what became of the files a node pushed to a watch.
+func (s *Server) nodeSent(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	var req nodeproto.SentRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.At.IsZero() || len(req.Results) > 1000 {
+		writeError(w, http.StatusBadRequest, "a report needs its time and at most 1,000 results")
+		return
+	}
+	dev, ok := s.nodeDevice(w, r, nc, req.Unit)
+	if !ok {
+		return
+	}
+	owner, err := nodehub.OwnerNow(r.Context(), s.st, dev)
+	if err != nil || owner == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	var res []outbox.Result
+	for _, x := range req.Results {
+		res = append(res, outbox.Result{Key: x.Key, SHA256: x.SHA256, UID: x.UID, Err: x.Error, Refused: x.Refused, Unsupported: x.Unsupported})
+	}
+	if err := outbox.Record(r.Context(), s.st, owner, dev.ID, res, req.At); err != nil {
 		s.internalError(w, r, err)
 		return
 	}

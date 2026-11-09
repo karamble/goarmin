@@ -25,6 +25,16 @@ export function Button({ variant = 'ghost', small, className = '', ...p }: Butto
   )
 }
 
+/** Switch is an on/off control (role switch), labelled for screen readers. */
+export function Switch({ on, label, onChange, disabled }: { on: boolean; label: string; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-lime' : 'bg-track'}`}>
+      <span className={`absolute top-0.5 h-5 w-5 rounded-full transition-[left] ${on ? 'left-[22px] bg-bg' : 'left-0.5 bg-text'}`} />
+    </button>
+  )
+}
+
 export function Card({ children, className = '', glass }: { children: ReactNode; className?: string; glass?: boolean }) {
   return <section className={`${glass ? 'card-glass' : 'card'} ${className}`}>{children}</section>
 }

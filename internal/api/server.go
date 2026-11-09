@@ -218,6 +218,7 @@ func (s *Server) routes(mux *router) {
 	mux.HandleFunc("GET /api/workouts/{id}", s.needUser(s.workout))
 	mux.HandleFunc("PATCH /api/workouts/{id}", s.needUser(s.patchWorkout))
 	mux.HandleFunc("DELETE /api/workouts/{id}", s.needUser(s.deleteWorkout))
+	mux.HandleFunc("PUT /api/workouts/{id}/watches/{device}", s.needUser(s.setWorkoutWatch))
 	mux.HandleFunc("GET /api/exercises", s.needUser(s.exercises))
 	mux.HandleFunc("GET /api/exercises/{category}/{number}", s.needUser(s.exercise))
 	mux.HandleFunc("GET /api/courses", s.needUser(s.courses))

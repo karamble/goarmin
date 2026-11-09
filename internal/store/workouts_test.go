@@ -233,6 +233,9 @@ func TestWorkoutRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib, _ = st.WorkoutLibrary(ctx, u.ID)
+	if lib.Workouts[0].Name != "Hone & Tone" || lib.Workouts[1].Name != "Plank" {
+		t.Fatalf("not by the shown name: %q, %q", lib.Workouts[0].Name, lib.Workouts[1].Name)
+	}
 	got, s := states(t, lib, "Hone & Tone")
 	if len(lib.Workouts) != 2 || got.ID != id || got.Origin != OriginGoarmin || got.Description != "Toning" || len(got.Versions) != 2 ||
 		!slices.Equal(got.Origins, []string{OriginGoarmin, OriginWatch}) || !slices.Equal(s, []string{PresenceRemoved}) {
@@ -283,4 +286,142 @@ func TestWorkoutRename(t *testing.T) {
 	if len(lib.Workouts) != 2 || got.Origin != OriginWatch || len(got.Versions) != 2 || !slices.Equal(s, []string{PresenceOn}) {
 		t.Fatalf("the edit removed: %+v, states %v (of %d)", got, s, len(lib.Workouts))
 	}
+}
+
+// TestWorkoutOutbox switches workouts on and off for a watch and follows what the next sync
+// sends: what the watch lacks, not what it refused or deleted since.
+func TestWorkoutOutbox(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	now := time.Now().Truncate(time.Second)
+	clock := now
+	st.SetClock(func() time.Time { return clock })
+	u, other := person(t, st, "a@example.invalid"), person(t, st, "b@example.invalid")
+	dev, err := st.EnsureDevice(ctx, Device{UnitID: 13, Name: "fenix 8 - 47mm", Address: "AA:BB:CC:DD:EE:13"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AssignIfUnowned(ctx, dev.ID, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	const uidA, uidB, uidSent = "4319872000000021-0100000000000001", "4319872000000022-0100000000000002", "4319872000000023-0100000000000003"
+	a := watchWorkout(t, st, u.ID, dev.ID, uidA, "Alpha", "training", now.AddDate(0, 0, -3))
+	b := watchWorkout(t, st, u.ID, dev.ID, uidB, "Bravo", "training", now.AddDate(0, 0, -3))
+	for uid, id := range map[string]int64{uidA: a.ID, uidB: b.ID} {
+		if err := st.LinkWatchItem(ctx, dev.ID, uid, "FIT_TYPE_5", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jf, _, err := st.AddRawFile(ctx, RawFile{SHA256: strings.Repeat("ef", 32), Size: 1, UserID: u.ID, Source: SourceGCExport,
+		SourceName: "x.zip/DI_CONNECT/DI-Connect-Fitness/a_workout.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.WriteExportFile(ctx, jf, &gcexport.Result{Kind: "workouts", Workouts: []gcexport.Workout{{Workout: fitwatch.Workout{
+		Name: "Charlie", Sport: "training", SubSport: "generic", Steps: []fitwatch.Step{{Index: 0, Duration: "reps", DurationValue: 10}}},
+		Updated: now.AddDate(0, 0, -5)}}}, "gcjson", 2); err != nil {
+		t.Fatal(err)
+	}
+	stock := func(at time.Time, uids ...string) {
+		t.Helper()
+		var items []InventoryItem
+		for _, uid := range uids {
+			items = append(items, item(uid))
+		}
+		if err := st.SetWatchInventory(ctx, dev.ID, WatchInventory{Types: []string{"FIT_TYPE_5"}, At: at, Items: items}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stock(now.Add(-2*time.Hour), uidA, uidB)
+	stock(now.Add(-time.Hour), uidA) // Bravo deleted on the watch
+	type want struct {
+		state, pending string
+		on             bool
+	}
+	check := func(step string, expect map[string]want) {
+		t.Helper()
+		lib, err := st.WorkoutLibrary(ctx, u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, e := range expect {
+			w, _ := states(t, lib, name)
+			p := w.Watches[0]
+			if p.State != e.state || p.Pending != e.pending || p.Want != e.on {
+				t.Errorf("%s, %s: state %s, pending %q, want %v; expected %+v (failed %q)", step, name, p.State, p.Pending, p.Want, e, p.Failed)
+			}
+		}
+		out, err := st.WatchOutbox(ctx, u.ID, dev.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, o := range out {
+			names = append(names, o.Version.Name)
+		}
+		var sends []string
+		for name, e := range expect {
+			if e.pending == PendingSend {
+				sends = append(sends, name)
+			}
+		}
+		slices.Sort(sends)
+		if !slices.Equal(names, sends) {
+			t.Errorf("%s: outbox %v, want %v", step, names, sends)
+		}
+	}
+	check("never switched", map[string]want{"Alpha": {PresenceOn, "", true}, "Bravo": {PresenceRemoved, "", false}, "Charlie": {PresenceAbsent, "", false}})
+
+	clock = now.Add(time.Minute)
+	key := func(name string) string { return WorkoutKey(name, "training") }
+	for name, on := range map[string]bool{"Alpha": false, "Bravo": true, "Charlie": true} {
+		if err := st.SetWorkoutTarget(ctx, u.ID, dev.ID, key(name), on); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("switched", map[string]want{"Alpha": {PresenceOn, PendingRemove, false}, "Bravo": {PresenceRemoved, PendingSend, true},
+		"Charlie": {PresenceAbsent, PendingSend, true}})
+	out, _ := st.WatchOutbox(ctx, u.ID, dev.ID)
+	if out[1].Version.Origin != OriginGarminConnect || out[0].Version.RawFileID != b.ID || out[1].EntryKey != key("Charlie") {
+		t.Fatalf("outbox versions %+v", out)
+	}
+	if out, err := st.WatchOutbox(ctx, other.ID, dev.ID); err != nil || out != nil {
+		t.Fatalf("another account's outbox for the watch: %v, %v", out, err)
+	}
+
+	// The sync: Charlie goes on, Bravo is refused.
+	clock = now.Add(2 * time.Minute)
+	if err := st.RecordSends(ctx, u.ID, dev.ID, []SendRecord{
+		{EntryKey: key("Charlie"), Reason: SendReasonLibrary, SHA256: "aa", UID: uidSent},
+		{EntryKey: key("Bravo"), Reason: SendReasonLibrary, SHA256: "bb", Err: "the watch refused", Refused: true},
+	}, clock); err != nil {
+		t.Fatal(err)
+	}
+	check("sent", map[string]want{"Bravo": {PresenceRemoved, "", true}, "Charlie": {PresenceOn, "", true}})
+	stock(now.Add(3*time.Minute), uidA, uidSent)
+	check("listed", map[string]want{"Alpha": {PresenceOn, PendingRemove, false}, "Charlie": {PresenceOn, "", true}})
+	if d, _ := st.DeviceByID(ctx, dev.ID); d.SendSupport != "yes" {
+		t.Fatalf("send support %q", d.SendSupport)
+	}
+
+	// Deleted on the watch: no longer wanted, not sent again, until switched on anew.
+	stock(now.Add(4*time.Minute), uidA)
+	check("deleted on the watch", map[string]want{"Charlie": {PresenceRemoved, "", false}})
+	clock = now.Add(5 * time.Minute)
+	for _, name := range []string{"Bravo", "Charlie"} {
+		if err := st.SetWorkoutTarget(ctx, u.ID, dev.ID, key(name), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("switched on again", map[string]want{"Bravo": {PresenceRemoved, PendingSend, true}, "Charlie": {PresenceRemoved, PendingSend, true}})
+
+	// A watch that takes no pushes gets none.
+	if err := st.RecordSends(ctx, u.ID, dev.ID, []SendRecord{{EntryKey: key("Bravo"), Reason: SendReasonLibrary, SHA256: "bb",
+		Err: "not supported", Refused: true, Unsupported: true}}, now.Add(6*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := st.DeviceByID(ctx, dev.ID); d.SendSupport != "no" {
+		t.Fatalf("send support after a refusal as unsupported: %q", d.SendSupport)
+	}
+	check("no pushes", map[string]want{"Bravo": {PresenceRemoved, "", true}, "Charlie": {PresenceRemoved, "", true}})
 }

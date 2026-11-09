@@ -23,6 +23,7 @@ import (
 	"github.com/karamble/goarmin/pkg/garmin/fileaccess"
 	"github.com/karamble/goarmin/pkg/garmin/multilink"
 	"github.com/karamble/goarmin/pkg/garmin/multilink/memlink"
+	"github.com/karamble/goarmin/pkg/garmin/smart"
 )
 
 const addr = "AA:BB:CC:DD:EE:01"
@@ -206,6 +207,42 @@ func TestSyncInventory(t *testing.T) {
 	res, err := SyncWith(ctx, Options{DataDir: dir, NoArchive: true}, addr, open, []int{0})
 	if err != nil || res.Inventory != nil {
 		t.Fatalf("without Inventory: %+v, %v", res.Inventory, err)
+	}
+}
+
+// TestSyncSend pushes files after the pulls and before the inventory, which lists the new
+// workout; a refused push does not stop the rest, and the workout comes back as the watch's.
+func TestSyncSend(t *testing.T) {
+	now := time.Now()
+	serial := uint32(3_500_000_002)
+	refuse := "FIT_TYPE_39"
+	w := fakewatch.New(fakewatch.Options{Faults: fakewatch.Faults{PushResult: func(typeName string, _ int) (smart.ItemAccessResult, bool) {
+		return smart.ItemAccessItemTypeNotSupported, typeName == refuse
+	}}})
+	w.AddFile("FIT_TYPE_5", fittest.File(typedef.FileWorkout, serial, now.Add(-48*time.Hour), 3))
+	open := func(_ context.Context, _ int) (multilink.Link, io.Closer, error) {
+		x, y := memlink.Pipe(memlink.Options{})
+		go func() { _ = w.Serve(context.Background(), y) }()
+		return x, x, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	workout := fittest.File(typedef.FileWorkout, serial, now.Add(-time.Hour), 5)
+	res, err := SyncWith(ctx, Options{DataDir: t.TempDir(), NoArchive: true, Inventory: InventoryTypes, Send: []Outgoing{
+		{Key: "odd", Type: refuse, Data: []byte("not a FIT file at all")},
+		{Key: "library:x", Type: "FIT_TYPE_5", Data: workout, Announce: true},
+	}}, addr, open, []int{0})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(res.Sent) != 2 || !res.Sent[0].Refused() || !res.Sent[0].Unsupported() || res.Sent[1].Err != nil || res.Sent[1].UID == "" ||
+		res.Sent[1].Key != "library:x" || len(res.Sent[1].SHA256) != 64 {
+		t.Fatalf("sent %+v", res.Sent)
+	}
+	if res.Inventory == nil || len(res.Inventory.Items) != 2 || !slices.ContainsFunc(res.Inventory.Items, func(it fileaccess.Item) bool {
+		return it.UID.String() == res.Sent[1].UID
+	}) {
+		t.Fatalf("the inventory after the push: %+v", res.Inventory)
 	}
 }
 

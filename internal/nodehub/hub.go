@@ -686,6 +686,14 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 	if stock {
 		sopt.Inventory = syncnode.InventoryTypes
 	}
+	ob, sends := h.be.(Outboxer)
+	if sends {
+		files, oerr := ob.Outbox(ctx, w)
+		if oerr != nil {
+			h.log.Warn("nodehub: what to send to the watch", "watch", addr, "err", oerr)
+		}
+		sopt.Send = files
+	}
 	handed := 0
 	if hd, ok := h.be.(Hander); ok {
 		sopt.Hand = func(ctx context.Context, f fileaccess.StoredFile) error {
@@ -724,6 +732,19 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 		if _, node := h.be.(Hander); !node {
 			err = ierr
 			run.ErrorCode = CodeImport
+		}
+	}
+	// What became of the pushes, before the inventory that lists them.
+	if sends && len(res.Sent) > 0 {
+		ok := 0
+		for _, o := range res.Sent {
+			if o.Err == nil {
+				ok++
+			}
+		}
+		h.log.Info("nodehub: sent to the watch", "watch", addr, "files", ok, "of", len(sopt.Send))
+		if serr := ob.Sent(ctx, w, res.Sent, time.Now()); serr != nil {
+			h.log.Warn("nodehub: recording what was sent to the watch", "watch", addr, "err", serr)
 		}
 	}
 	// What the watch keeps now, after the files are stored (so they link to its items).

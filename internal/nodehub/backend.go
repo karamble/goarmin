@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/karamble/goarmin/internal/ingest"
+	"github.com/karamble/goarmin/internal/outbox"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/internal/syncnode"
 	"github.com/karamble/goarmin/pkg/garmin/fileaccess"
@@ -48,6 +49,13 @@ type Hander interface {
 // a backend that is one.
 type Inventorier interface {
 	Inventory(ctx context.Context, w Watch, inv syncnode.Inventory) error
+}
+
+// Outboxer is a Backend that has files for the watch: the workouts its owner's library wants
+// on it. A sync pushes them after its pulls and deletes, and hands back what became of them.
+type Outboxer interface {
+	Outbox(ctx context.Context, w Watch) ([]syncnode.Outgoing, error)
+	Sent(ctx context.Context, w Watch, sent []syncnode.SendOutcome, at time.Time) error
 }
 
 // Watch is how one watch is synced now.
@@ -137,6 +145,47 @@ func (l Local) Finish(ctx context.Context, w Watch, out Outcome) error {
 	}
 	errs = append(errs, st.RecordSyncRun(ctx, out.Run))
 	return errors.Join(errs...)
+}
+
+var _ Outboxer = Local{}
+
+// Outbox implements Outboxer.
+func (l Local) Outbox(ctx context.Context, w Watch) ([]syncnode.Outgoing, error) {
+	if w.DeviceID == 0 || w.Owner == 0 {
+		return nil, nil
+	}
+	files, err := outbox.Build(ctx, l.In.Store, l.In.Blobs, w.Owner, w.DeviceID)
+	return Outgoing(files), err
+}
+
+// Sent implements Outboxer.
+func (l Local) Sent(ctx context.Context, w Watch, sent []syncnode.SendOutcome, at time.Time) error {
+	if w.DeviceID == 0 || w.Owner == 0 {
+		return nil
+	}
+	return outbox.Record(ctx, l.In.Store, w.Owner, w.DeviceID, Results(sent), at)
+}
+
+// Outgoing is an outbox as a sync pushes it.
+func Outgoing(files []outbox.File) []syncnode.Outgoing {
+	var out []syncnode.Outgoing
+	for _, f := range files {
+		out = append(out, syncnode.Outgoing{Key: f.Key, Type: f.Type, Data: f.Data, Announce: f.Announce})
+	}
+	return out
+}
+
+// Results is what became of a sync's pushes, as the outbox records it.
+func Results(sent []syncnode.SendOutcome) []outbox.Result {
+	var out []outbox.Result
+	for _, o := range sent {
+		r := outbox.Result{Key: o.Key, SHA256: o.SHA256, UID: o.UID, Refused: o.Refused(), Unsupported: o.Unsupported()}
+		if o.Err != nil {
+			r.Err = o.Err.Error()
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 var _ Inventorier = Local{}

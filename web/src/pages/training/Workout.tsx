@@ -7,11 +7,12 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
 import { useWorkout, useWorkoutEdits } from '../../api/hooks/training'
-import type { Workout, WorkoutStep } from '../../api/types'
+import type { Workout, WorkoutStep, WorkoutWatch } from '../../api/types'
 import { usePlanActions } from '../../api/hooks/calendar'
 import { HeaderActions, useSectionTitle } from '../../app/section/HeaderSlot'
 import { useToday } from '../../app/section/usePeriod'
 import { Sheet } from '../../ui/Sheet'
+import { Switch } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
 import { hm, type Units } from '../../lib/format'
 import { FigureDialog, type FigureItem } from '../../figures/FigureDialog'
@@ -82,6 +83,7 @@ export default function WorkoutPage() {
               </div>
               {w.description && <p className="m-0 mt-3 max-w-[72ch] text-[14px] text-muted">{w.description}</p>}
             </section>
+            {(w.watches ?? []).length > 0 && <OnWatches w={w} />}
             <Card title="Steps">
               <ol className="m-0 grid list-none gap-2 p-0">
                 {blocks(steps).map((b, i) => b.kind === 'step' ? (
@@ -118,6 +120,40 @@ export default function WorkoutPage() {
       }}
     </Loaded>
   )
+}
+
+/** OnWatches switches the workout on or off for each watch: on, the watch gets it at its next
+ * sync; off, it waits to be deleted on the watch (a watch takes no deletes). */
+function OnWatches({ w }: { w: Workout }) {
+  const { onWatch } = useWorkoutEdits()
+  const toast = useToast()
+  const set = (x: WorkoutWatch, on: boolean) => onWatch.mutate({ id: w.id, device: x.device_id, on }, {
+    onError: (e) => toast({ text: `Not changed: ${(e as Error).message}`, tone: 'error' }),
+  })
+  return (
+    <Card title="On your watches">
+      <ul className="m-0 grid list-none gap-3 p-0">
+        {(w.watches ?? []).map((x) => (
+          <li key={x.device_id} className="flex items-start gap-3">
+            <Switch on={x.want} label={`On ${x.name}`} disabled={onWatch.isPending} onChange={(on) => set(x, on)} />
+            <div className="min-w-0">
+              <p className="m-0 text-[14px] text-text">{x.name}</p>
+              <p className="m-0 text-[13px] text-muted">{watchLine(x, w.name)}</p>
+              {x.failed && <p className="m-0 text-[13px] text-[#e08585]">Not sent: {x.failed}</p>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+/** watchLine says where the workout is on one watch and what happens next. */
+export function watchLine(x: WorkoutWatch, name: string): string {
+  if (x.pending === 'send') return 'Goes on the watch at its next sync.'
+  if (x.pending === 'remove') return `Switched off. goarmin can't delete from a watch: on the watch, open Workouts › ${name} › Delete.`
+  if (x.state === 'on') return 'On the watch.'
+  return x.state === 'unknown' ? 'Not checked yet: the watch has not synced since.' : 'Not on the watch. Switch it on to send it at the next sync.'
 }
 
 /** Rename gives a workout another name or description. goarmin keeps it as its own version;

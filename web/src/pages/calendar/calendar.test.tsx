@@ -54,7 +54,7 @@ const days: CalendarDay[] = [
 
 const library: Workout[] = [
   { id: 4, name: 'Tempo', sport: 'running', sub_sport: 'generic', estimated_s: 1500, step_count: 3, exercise_count: 0, recorded_at: now, origin: 'watch',
-    origins: ['watch'], watches: [{ device_id: 1, name: 'Fenix 8', state: 'on', checked_at: now }] },
+    origins: ['watch'], watches: [{ device_id: 1, name: 'Fenix 8', state: 'on', checked_at: now, want: true }] },
   { id: 5, name: 'Core 20', sport: 'training', sub_sport: 'strength_training', estimated_s: 1200, step_count: 6, exercise_count: 4, recorded_at: now,
     origin: 'garmin_connect', origins: ['garmin_connect'], watches: [] },
 ]

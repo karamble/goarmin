@@ -114,6 +114,15 @@ type WorkoutPresence struct {
 	DeviceID int64
 	State    string
 	At       time.Time
+	// Want says the workout belongs on this watch: the library's switch, or, never switched,
+	// whether the watch has it. Switched on and then deleted on the watch, it is no longer
+	// wanted.
+	Want bool
+	// Pending is what the next sync does about it: PendingSend, or PendingRemove (it waits to be
+	// deleted on the watch, which takes no deletes); "" nothing.
+	Pending string
+	// Failed is why the last push of it to this watch failed ("" if it did not).
+	Failed string
 }
 
 // LibraryWatch is a watch the library reports on: one of the account's current watches that
@@ -241,6 +250,32 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 			return lib, err
 		}
 	}
+	targets, sends, err := s.libraryWants(ctx, user)
+	if err != nil {
+		return lib, err
+	}
+	// A workout goarmin pushed is on the watch under the id the watch gave it, before the watch
+	// hands the file back.
+	for dev, byKey := range sends {
+		for k, x := range byKey {
+			if !x.ok || x.uid == "" || x.listed == 0 && x.gone == 0 {
+				continue
+			}
+			if where[dev] == nil {
+				where[dev] = map[string]*seen{}
+			}
+			y := where[dev][k]
+			if y == nil {
+				y = &seen{}
+				where[dev][k] = y
+			}
+			if x.gone == 0 {
+				y.on = max(y.on, x.listed)
+			} else {
+				y.gone = max(y.gone, x.gone)
+			}
+		}
+	}
 
 	groups := map[string]*LibraryWorkout{}
 	var order []string
@@ -284,10 +319,16 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 			case w.InventoryAt.IsZero():
 				p.State = PresenceUnknown
 			}
+			t, switched := targets[w.ID][k]
+			wantOn(&p, w, t, switched, sends[w.ID][k])
 			g.Watches = append(g.Watches, p)
 		}
 		lib.Workouts = append(lib.Workouts, *g)
 	}
+	// By the name shown (a renamed workout under its new name).
+	slices.SortStableFunc(lib.Workouts, func(a, b LibraryWorkout) int {
+		return cmp.Or(cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), cmp.Compare(a.ID, b.ID))
+	})
 	return lib, nil
 }
 

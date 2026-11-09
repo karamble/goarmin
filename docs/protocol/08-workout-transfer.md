@@ -103,5 +103,9 @@ Delete). Scheduled days are removed by pushing the schedule again without them.
 
 - **Push:** `fileaccess.Engine.Push` sends a file; `fitwatch.EncodeWorkout` and
   `fitwatch.EncodeSchedule` write the files.
+- **Sync:** `syncnode.Options.Send` pushes files after the pulls and deletes and before the
+  sync takes stock, so the inventory lists them. The server's outbox (`internal/outbox`) says
+  what: the workouts the library switched on that a watch lacks. A push the watch refuses is not
+  retried until the workout is switched on again; a lost link ends the sync's pushes.
 - **Probe:** `goarmin probe -device … -send FILE -type 5|7` pushes a file by hand;
   `-inventory 5` lists the watch's workouts.

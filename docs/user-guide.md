@@ -97,6 +97,12 @@ the same numbers.
       last sync checked.
     - Search by name or sport, and filter by sport, source and *On ‹watch›* or *On no watch*.
       The filters stay in the address, so a view can be bookmarked.
+    - **On your watches** has a switch per watch. Switched on, the watch gets the workout at its
+      next sync, which starts at once (with the watch near the computer that syncs it). A
+      switch is on for what a watch has. Switched off, goarmin sends it no more, but it cannot
+      delete from a watch: the page says to delete it on the watch (Workouts › the workout ›
+      Delete), and notices when it is gone. A workout you delete on the watch is not sent again
+      until you switch it on again.
     - **Rename** gives a workout another name or description (Garmin Connect's copies start
       with "Copy of"). goarmin keeps it as its own version and keeps the original too: *Back to
       the original* undoes it.

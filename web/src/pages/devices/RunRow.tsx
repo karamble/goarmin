@@ -9,7 +9,7 @@ import { errorHint } from '../../lib/devices'
 import { bytes, timeOfDay } from '../../lib/format'
 import { relDay, today as todayIn } from '../../lib/period'
 
-const by = { schedule: 'scheduled', manual: 'Sync now', wizard: 'first sync', delete: 'delete' } as const
+const by = { schedule: 'scheduled', manual: 'Sync now', wizard: 'first sync', delete: 'delete', library: 'workout sent' } as const
 
 /** A run, or several not-in-range runs folded into one. */
 export interface LogEntry {

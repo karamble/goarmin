@@ -15,7 +15,7 @@ function wk(id: number, name: string, sport: string, sub: string, origins: Worko
   }
 }
 
-const fenix = (state: WorkoutWatch['state'], since?: number): WorkoutWatch => ({ device_id: 7, name: 'Fenix 8', state, since, checked_at: now - 600 })
+const fenix = (state: WorkoutWatch['state'], since?: number): WorkoutWatch => ({ device_id: 7, name: 'Fenix 8', state, since, checked_at: now - 600, want: state === 'on' })
 
 const lib = [
   wk(1, 'Master Core Control', 'fitness_equipment', 'pilates', ['watch', 'garmin_connect'], [fenix('on', now - 600)]),

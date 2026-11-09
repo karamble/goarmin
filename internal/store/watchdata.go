@@ -289,6 +289,9 @@ type WorkoutRow struct {
 	// EntryKey is the library entry the version belongs to: the key of its name and sport
 	// (WorkoutKey), or of the entry a renamed workout began in.
 	EntryKey string
+	// RawFileID is the file a watch's or Garmin Connect's version was read from (0: goarmin's
+	// own).
+	RawFileID int64
 	fitwatch.Workout
 }
 
@@ -318,7 +321,8 @@ func entryKeyOf(ctx context.Context, tx *sql.Tx, user int64, name, sport string)
 // Workouts returns user's stored workouts by name, every version of each; with id > 0 only that
 // one (or ErrNotFound).
 func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, error) {
-	q := `SELECT id, origin, device_id, description, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at FROM workouts WHERE user_id = ?`
+	q := `SELECT id, origin, device_id, description, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at, COALESCE(raw_file_id, 0)
+		FROM workouts WHERE user_id = ?`
 	args := []any{user}
 	if id > 0 {
 		q += ` AND id = ?`
@@ -334,7 +338,7 @@ func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, err
 		var r WorkoutRow
 		var steps string
 		var at int64
-		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.EntryKey, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at); err != nil {
+		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.EntryKey, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at, &r.RawFileID); err != nil {
 			return nil, err
 		}
 		r.RecordedAt = time.Unix(at, 0)

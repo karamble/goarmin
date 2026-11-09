@@ -121,6 +121,29 @@ func TestEncodeWorkoutAsGarminConnect(t *testing.T) {
 	}
 }
 
+// TestEncodeLongDescription: a description over a FIT text field's 255 bytes (Garmin
+// Connect's run to about 400) is cut at a character boundary instead of failing the file.
+func TestEncodeLongDescription(t *testing.T) {
+	desc := strings.Repeat("a", 253) + "ü more text after the limit"
+	b, err := EncodeWorkout(strength(), desc, EncodeOptions{Serial: 1, Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fit, err := decoder.New(bytes.NewReader(b)).Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range fit.Messages {
+		if m.Num == typedef.MesgNumWorkout {
+			if got := mesgdef.NewWorkout(&m).WktDescription; got != strings.Repeat("a", 253) {
+				t.Fatalf("description %q (%d bytes)", got, len(got))
+			}
+			return
+		}
+	}
+	t.Fatal("no workout message")
+}
+
 func TestValidateWorkout(t *testing.T) {
 	ok := strength()
 	for name, change := range map[string]func(*Workout){

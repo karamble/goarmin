@@ -14,7 +14,7 @@ import {
   finished, howWords, keptFolders, ownerWords, pickedFrom, reportLine, selectionName, sortPicked, statusWords, usbWatchName, type Picked,
 } from '../../lib/imports'
 import { droppedFiles, uploadFiles } from '../../lib/upload'
-import { Button, Notice, Skeleton, Spinner } from '../../ui/kit'
+import { Button, Notice, Skeleton, Spinner, Switch } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
 import { RunningImports } from './ImportProgress'
 
@@ -27,15 +27,6 @@ export default function ImportPage() {
       <FilesSection />
       <History />
     </div>
-  )
-}
-
-function Switch({ on, label, onChange, disabled }: { on: boolean; label: string; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
-      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-lime' : 'bg-track'}`}>
-      <span className={`absolute top-0.5 h-5 w-5 rounded-full transition-[left] ${on ? 'left-[22px] bg-bg' : 'left-0.5 bg-text'}`} />
-    </button>
   )
 }
 

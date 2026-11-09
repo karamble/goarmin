@@ -100,7 +100,7 @@ func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, er
 	msgs := []proto.Message{fileID(typedef.FileWorkout, opt), fileCreator(garminConnectSoftware)}
 	wk := mesgdef.NewWorkout(nil)
 	wk.WktName, wk.Sport, wk.SubSport = w.Name, sport, sub
-	wk.WktDescription = strings.TrimSpace(description)
+	wk.WktDescription = cutBytes(strings.TrimSpace(description), maxText) // Garmin Connect's run longer
 	wk.Capabilities = typedef.WorkoutCapabilitiesTcx
 	wk.NumValidSteps, wk.MessageIndex = uint16(len(w.Steps)), 0
 	if est := Estimate(w.Steps); est > 0 {
@@ -159,13 +159,7 @@ func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, er
 // memo is a step's notes as a memo_glob, the whole text (Garmin Connect writes it beside the
 // step's notes field).
 func memo(notes string, step int) proto.Message {
-	b := []byte(notes)
-	if len(b) > 254 {
-		b = b[:254]
-		for len(b) > 0 && !utf8.Valid(b) {
-			b = b[:len(b)-1]
-		}
-	}
+	b := []byte(cutBytes(notes, maxText))
 	m := mesgdef.NewMemoGlob(nil)
 	m.PartIndex, m.MesgNum, m.ParentIndex, m.FieldNum = 0, typedef.MesgNumWorkoutStep, typedef.MessageIndex(step), 8
 	m.Data = append(b, 0)
@@ -279,6 +273,21 @@ func encodeStep(s Step, i int, pos map[int]int) (*mesgdef.WorkoutStep, error) {
 		st.ExerciseWeight = uint16(math.Round(s.WeightKg * 100))
 	}
 	return st, nil
+}
+
+// maxText is the most bytes a FIT text field holds, its terminating zero aside.
+const maxText = 254
+
+// cutBytes cuts s to at most n bytes, at a character boundary.
+func cutBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	b := []byte(s[:n])
+	for len(b) > 0 && !utf8.Valid(b) {
+		b = b[:len(b)-1]
+	}
+	return string(b)
 }
 
 func truncateRunes(s string, n int) string {

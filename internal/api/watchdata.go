@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/karamble/goarmin/internal/nodehub"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/fitwatch"
 )
@@ -146,9 +148,15 @@ func libraryJSON(x store.LibraryWorkout, watches []store.LibraryWatch, steps boo
 		if name == "" {
 			name = d.Name
 		}
-		m := map[string]any{"device_id": p.DeviceID, "name": name, "state": p.State}
+		m := map[string]any{"device_id": p.DeviceID, "name": name, "state": p.State, "want": p.Want}
 		if !p.At.IsZero() {
 			m["since"] = p.At.Unix()
+		}
+		if p.Pending != "" {
+			m["pending"] = p.Pending
+		}
+		if p.Failed != "" {
+			m["failed"] = p.Failed
 		}
 		if !d.InventoryAt.IsZero() {
 			m["checked_at"] = d.InventoryAt.Unix()
@@ -197,6 +205,61 @@ func (s *Server) workout(w http.ResponseWriter, r *http.Request, u store.User) {
 	if err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
+}
+
+// setWorkoutWatch switches a library workout on or off for one of the account's watches. On,
+// the watch gets it at its next sync (which starts now) if it lacks it; off, it stays on the
+// watch until deleted there, which goarmin cannot do.
+func (s *Server) setWorkoutWatch(w http.ResponseWriter, r *http.Request, u store.User) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusNotFound, "no such workout")
+		return
+	}
+	dev, err := strconv.ParseInt(r.PathValue("device"), 10, 64)
+	if err != nil || dev <= 0 {
+		writeError(w, http.StatusNotFound, "no such watch")
+		return
+	}
+	var req struct {
+		On *bool `json:"on"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.On == nil {
+		writeError(w, http.StatusBadRequest, `say {"on": true} or {"on": false}`)
+		return
+	}
+	x, watches, err := s.st.LibraryWorkoutByID(r.Context(), u.ID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such workout")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	i := slices.IndexFunc(watches, func(lw store.LibraryWatch) bool { return lw.ID == dev })
+	if i < 0 {
+		writeError(w, http.StatusNotFound, "no such watch of yours")
+		return
+	}
+	if err := s.st.SetWorkoutTarget(r.Context(), u.ID, dev, x.EntryKey, *req.On); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	x, watches, err = s.st.LibraryWorkoutByID(r.Context(), u.ID, id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if x.Watches[i].Pending == store.PendingSend && s.opt.Node != nil && watches[i].Address != "" {
+		if err := s.opt.Node.Sync(nodehub.Request{Addr: watches[i].Address, By: store.StartedByLibrary}); err != nil {
+			s.log.Info("api: the watch gets the workout at its next sync", "device", dev, "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
 }

@@ -151,6 +151,39 @@ type InventoryItem struct {
 	Size uint64 `json:"size"`
 }
 
+// OutboxResponse is what a watch should get at its sync: files to push, in order (GET
+// outbox?unit=).
+type OutboxResponse struct {
+	Files []OutboxFile `json:"files"`
+}
+
+// OutboxFile is one file for the watch: its key (echoed in SentRequest), GDXML type name and
+// bytes; Announce waits for the watch to name the new item.
+type OutboxFile struct {
+	Key      string `json:"key"`
+	Type     string `json:"type"`
+	Data     []byte `json:"data"`
+	Announce bool   `json:"announce,omitempty"`
+}
+
+// SentRequest is what became of the files a sync pushed to a watch.
+type SentRequest struct {
+	Unit    uint32       `json:"unit"`
+	At      time.Time    `json:"at"`
+	Results []SentResult `json:"results"`
+}
+
+// SentResult is one pushed file: the watch's id for it, or why the push failed (Refused: the
+// watch said no; Unsupported: it takes no pushes of that kind).
+type SentResult struct {
+	Key         string `json:"key"`
+	SHA256      string `json:"sha256"`
+	UID         string `json:"uid,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Refused     bool   `json:"refused,omitempty"`
+	Unsupported bool   `json:"unsupported,omitempty"`
+}
+
 // HistoryResponse is a watch's last sync runs, newest first.
 type HistoryResponse struct {
 	Runs []store.SyncRun `json:"runs"`

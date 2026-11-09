@@ -106,4 +106,31 @@ func TestNodeWorkoutLibrary(t *testing.T) {
 		t.Fatalf("sync now: %d %s", code, body)
 	}
 	waitFor(t, "the workout removed on the watch", 20*time.Second, func() bool { return state() == "removed" })
+
+	// Switched on again in the library: the sync it starts sends the watch its original bytes,
+	// once; the watch lists it, and a later sync sends nothing.
+	code, body := s.do(t, http.MethodGet, "/api/workouts", nil)
+	var list []struct {
+		ID int64 `json:"id"`
+	}
+	if code != 200 || json.Unmarshal(body, &list) != nil || len(list) != 1 {
+		t.Fatalf("library: %d %s", code, body)
+	}
+	if code, body := s.do(t, http.MethodPut, "/api/workouts/"+itoa(list[0].ID)+"/watches/"+itoa(dev.ID), map[string]any{"on": true}); code != http.StatusOK {
+		t.Fatalf("switch on: %d %s", code, body)
+	}
+	waitFor(t, "the workout sent back to the watch", 20*time.Second, func() bool { return state() == "on" })
+	if n := w.Stats().Pushes; n != 1 {
+		t.Fatalf("%d pushes", n)
+	}
+	if code, body := s.do(t, http.MethodPost, "/api/devices/"+itoa(dev.ID)+"/sync", nil); code != http.StatusAccepted {
+		t.Fatalf("sync now: %d %s", code, body)
+	}
+	waitFor(t, "a second sync", 20*time.Second, func() bool {
+		runs, err := s.st.RecentSyncRuns(ctx, dev.ID, 10)
+		return err == nil && len(runs) >= 4
+	})
+	if n := w.Stats().Pushes; n != 1 || state() != "on" {
+		t.Fatalf("after another sync: %d pushes, %s", n, state())
+	}
 }

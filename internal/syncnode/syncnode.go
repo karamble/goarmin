@@ -14,6 +14,8 @@ package syncnode
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +82,39 @@ type Options struct {
 	// Inventory, if set, takes stock of these GDXML types at the end of a sync: every item of
 	// them the watch keeps, synced or not (Result.Inventory). It is read-only.
 	Inventory []string
+	// Send lists files to push to the watch after the sync's pulls and deletes, before it takes
+	// stock (Result.Sent), so the inventory lists what was just sent.
+	Send []Outgoing
+}
+
+// Outgoing is a file a sync pushes to the watch (Options.Send).
+type Outgoing struct {
+	Key  string // the caller's name for it, echoed in its outcome
+	Type string // its GDXML type name: "FIT_TYPE_5" (a workout), "FIT_TYPE_7" (a schedule)
+	Data []byte
+	// Announce waits for the watch to name the new item: a workout. (A schedule is not
+	// announced.)
+	Announce bool
+}
+
+// SendOutcome is what became of one Outgoing.
+type SendOutcome struct {
+	Key    string
+	SHA256 string // of the bytes sent
+	UID    string // the watch's id for the new item ("" if it named none)
+	Err    error
+}
+
+// Refused reports whether the watch said no to the push (rather than the link failing).
+func (o SendOutcome) Refused() bool {
+	var pe *fileaccess.PushError
+	return errors.As(o.Err, &pe)
+}
+
+// Unsupported reports whether the watch refused because it takes no pushes of that kind.
+func (o SendOutcome) Unsupported() bool {
+	var pe *fileaccess.PushError
+	return errors.As(o.Err, &pe) && (pe.Result == smart.ItemAccessItemTypeNotSupported || pe.Result == smart.ItemAccessNoSupportedTransport)
 }
 
 // InventoryTypes are what a sync takes stock of: the watch's workouts (FIT type 5), so the
@@ -119,6 +154,9 @@ type Result struct {
 	// Inventory is what the watch kept of Options.Inventory's types after the sync (nil: not
 	// asked, or the listing failed).
 	Inventory *Inventory
+	// Sent holds the outcome of each Options.Send push tried, in order. After a push that
+	// failed without the watch refusing it (the link), the rest are not tried and have none.
+	Sent []SendOutcome
 }
 
 // DeleteOutcome is the result of one requested delete.
@@ -334,6 +372,7 @@ func syncWith(ctx context.Context, opt Options, addr string, open watch.Opener, 
 	res.SyncTime = time.Since(syncStart)
 	if err == nil {
 		res.Deleted = deleteStored(ctx, eng, store, opt.Delete, opt.IsStored)
+		res.Sent = sendAll(ctx, eng, opt.Send, opt.Logger)
 		if len(opt.Inventory) > 0 {
 			ictx, icancel := context.WithTimeout(ctx, 30*time.Second)
 			items, ierr := eng.Inventory(ictx, opt.Inventory)
@@ -494,6 +533,33 @@ func IsActivity(it fileaccess.Item) bool {
 
 // deleteStored deletes the listed items from the watch, each only if the spool holds it and,
 // for FIT items, the stored file is still a valid FIT file.
+// sendAll pushes files to the watch in order, until a push fails other than by the watch's
+// refusal (the link is gone, the rest would fail too).
+func sendAll(ctx context.Context, eng *fileaccess.Engine, files []Outgoing, log *slog.Logger) []SendOutcome {
+	var out []SendOutcome
+	for _, f := range files {
+		sum := sha256.Sum256(f.Data)
+		o := SendOutcome{Key: f.Key, SHA256: hex.EncodeToString(sum[:])}
+		pctx, cancel := context.WithTimeout(ctx, time.Minute)
+		p, err := eng.Push(pctx, f.Type, f.Data, fileaccess.PushOptions{Announce: f.Announce})
+		cancel()
+		o.Err = err
+		if err == nil && p.Announced {
+			o.UID = p.UID.String()
+		}
+		out = append(out, o)
+		if err != nil {
+			log.Warn("sending a file to the watch", "type", f.Type, "size", len(f.Data), "err", err)
+			if !o.Refused() {
+				break
+			}
+			continue
+		}
+		log.Info("sent a file to the watch", "type", f.Type, "size", len(f.Data), "uid", o.UID)
+	}
+	return out
+}
+
 func deleteStored(ctx context.Context, eng *fileaccess.Engine, store *fileaccess.DirStore, uids []string, elsewhere func(string) bool) []DeleteOutcome {
 	if len(uids) == 0 {
 		return nil

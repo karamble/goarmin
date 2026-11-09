@@ -196,6 +196,17 @@ func (c *Client) Inventory(ctx context.Context, req nodeproto.InventoryRequest) 
 	return c.json(ctx, http.MethodPost, "/inventory", req, nil)
 }
 
+// Outbox asks what to push to a watch at its sync.
+func (c *Client) Outbox(ctx context.Context, unit uint32) (nodeproto.OutboxResponse, error) {
+	var out nodeproto.OutboxResponse
+	return out, c.json(ctx, http.MethodGet, "/outbox?unit="+strconv.FormatUint(uint64(unit), 10), nil, &out)
+}
+
+// Sent reports what became of the files a sync pushed.
+func (c *Client) Sent(ctx context.Context, req nodeproto.SentRequest) error {
+	return c.json(ctx, http.MethodPost, "/sent", req, nil)
+}
+
 // History returns a watch's last sync runs.
 func (c *Client) History(ctx context.Context, unit uint32) (nodeproto.HistoryResponse, error) {
 	var out nodeproto.HistoryResponse

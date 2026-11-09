@@ -102,6 +102,17 @@ export function useWorkoutEdits() {
       onSuccess: done,
     }),
     undo: useMutation({ mutationFn: (id: number) => request<void>('DELETE', `/workouts/${id}`), onSuccess: done }),
+    /** onWatch switches the workout on or off for a watch; on, the watch gets it at its next
+     * sync, which starts at once. */
+    onWatch: useMutation({
+      mutationFn: ({ id, device, on }: { id: number; device: number; on: boolean }) =>
+        request<Workout>('PUT', `/workouts/${id}/watches/${device}`, { on }),
+      onSuccess: (w, v) => {
+        qc.setQueryData(keys.workout(v.id), w)
+        done()
+        void qc.invalidateQueries({ queryKey: keys.devices })
+      },
+    }),
   }
 }
 

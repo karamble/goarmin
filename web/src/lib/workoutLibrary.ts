@@ -32,6 +32,8 @@ export function originText(origins: WorkoutOrigin[]): string {
 /** presenceText says where a workout is on one watch: short for a badge among others (the
  * watch named apart), long on its own. */
 export function presenceText(w: WorkoutWatch): { short: string; long: string } {
+  if (w.pending === 'send') return { short: 'Goes on at the next sync', long: `Goes on ${w.name} at the next sync` }
+  if (w.pending === 'remove') return { short: 'Delete it on the watch', long: `Switched off: delete it on ${w.name}` }
   switch (w.state) {
     case 'on':
       return { short: 'On the watch', long: `On ${w.name}` }

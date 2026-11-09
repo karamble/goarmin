@@ -913,4 +913,33 @@ ALTER TABLE workouts_v20 RENAME TO workouts;
 CREATE INDEX workouts_file ON workouts(raw_file_id);
 CREATE UNIQUE INDEX workouts_edit ON workouts(user_id, entry_key) WHERE origin = 'goarmin';
 `,
+	// 21: sending workouts to a watch. workout_targets is the library's switch per workout and
+	// watch (no row: the workout is wanted while the watch has it). watch_sends is what goarmin
+	// pushed to a watch, per workout and reason, with the watch's id for it or why it failed.
+	// devices.send_support is yes once a watch took a push, no once it refused pushes.
+	`
+CREATE TABLE workout_targets (
+	user_id INTEGER NOT NULL,
+	device_id INTEGER NOT NULL,
+	entry_key TEXT NOT NULL,
+	want INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY (user_id, device_id, entry_key)
+) WITHOUT ROWID;
+
+CREATE TABLE watch_sends (
+	user_id INTEGER NOT NULL,
+	device_id INTEGER NOT NULL,
+	entry_key TEXT NOT NULL,
+	reason TEXT NOT NULL,                       -- library
+	sha256 TEXT NOT NULL,                       -- the bytes sent
+	item_uid TEXT NOT NULL DEFAULT '',          -- the watch's id for them ('' if it named none)
+	ok INTEGER NOT NULL,
+	refused INTEGER NOT NULL DEFAULT 0,         -- the watch said no (not a lost link)
+	error TEXT NOT NULL DEFAULT '',
+	at INTEGER NOT NULL,
+	PRIMARY KEY (user_id, device_id, entry_key, reason)
+) WITHOUT ROWID;
+ALTER TABLE devices ADD COLUMN send_support TEXT NOT NULL DEFAULT '';
+`,
 }

@@ -156,6 +156,13 @@ var Tools = []Tool{
 			{Name: "name", In: InBody, Type: "string", Desc: "the new name, at most 40 characters"},
 			{Name: "description", In: InBody, Type: "string", Desc: "the new description, at most 1,000 characters"},
 		}},
+	{Name: "set_workout_on_watch", Title: "Put a workout on a watch, or take it off", Area: "Training", Level: Write, Method: "PUT", Path: "/api/workouts/{id}/watches/{device}", Idempotent: true,
+		Desc: "Switch a library workout on or off for one of the account's watches (watches in list_workouts). On: the watch gets it at its next sync, which starts now, if it lacks it. Off: goarmin sends it no more, but a watch takes no deletes; the user deletes it on the watch (Workouts › the workout › Delete).",
+		Args: []Arg{
+			id("the workout's id (list_workouts)"),
+			{Name: "device", In: InPath, Type: "integer", Required: true, Desc: "the watch's device id (list_workouts' watches)"},
+			{Name: "on", In: InBody, Type: "boolean", Required: true, Desc: "true: on the watch; false: not"},
+		}},
 	{Name: "discard_workout_edit", Title: "Undo a workout's rename or edit", Area: "Training", Level: Write, Method: "DELETE", Path: "/api/workouts/{id}", Destructive: true, Idempotent: true,
 		Desc: "Remove goarmin's own version of a workout (its id is the version of origin goarmin in get_workout's versions); the library shows the original again. A watch's or Garmin Connect's version cannot be removed.",
 		Args: []Arg{id("the id of the workout's goarmin version")}},
