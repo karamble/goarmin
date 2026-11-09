@@ -30,6 +30,9 @@ flowchart LR
 - **Holds and loops:** a hold shows one key pose. A movement loops between two to five key poses
   (0.55 s on each, 0.9 s to blend to the next).
 - **Reduced motion:** the figure stands still on a key pose, with a stepper for the others.
+- **Disclaimer:** every figure carries the line *This visualization is for illustrative purposes
+  only; accuracy is not guaranteed. Please consult a professional instructor.* (from
+  `web/src/lib/disclaimer.ts`, shared with the About dialog and repeated in the README).
 - **Where a figure comes from** (`quality`):
   - **own:** posed for that exercise. These are the 45 exercises of the author's workouts.
   - **family:** shared with similar movements. *Dumbbell Lunge* and *Walking Lunge* both use the

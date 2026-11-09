@@ -15,6 +15,9 @@ but see no one else's health data either.
   sign out), "go to" a date ("yesterday", "3 days ago", "2026-10-03"), and your recent
   activities, workouts and courses.
 - In week, month and year views, click a day (a bar, a dot, a calendar cell) to open it.
+- **About** (under *Go to…* in the rail; in *More* on phones) shows the version, the link to the
+  source code and the disclaimer of liability: use at your own risk, no medical advice (the
+  data's accuracy is not guaranteed), and the exercise figures are simplified illustrations.
 
 ## At a glance
 

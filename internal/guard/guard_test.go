@@ -208,6 +208,7 @@ func TestWebNpmUserAgent(t *testing.T) {
 var webURLAllowed = []string{
 	"http://localhost",                        // tests parsing relative URLs
 	"https://www.openstreetmap.org/copyright", // the map attribution link (opened by the user)
+	"https://github.com/karamble/goarmin",     // the source link in About (opened by the user)
 }
 
 func TestNoThirdPartyURLsInWeb(t *testing.T) {

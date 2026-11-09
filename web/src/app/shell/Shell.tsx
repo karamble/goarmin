@@ -11,6 +11,7 @@ import { CommandPalette } from '../palette/CommandPalette'
 import { RouteErrorBoundary } from '../RouteErrorBoundary'
 import { visibleSections } from '../routes'
 import { load, save } from '../storage'
+import { AboutHost } from './About'
 import { BottomBar } from './BottomBar'
 import { Rail } from './Rail'
 import { useSyncRefresh } from './SyncFreshness'
@@ -41,6 +42,7 @@ export function Shell({ me }: { me: Me }) {
         </main>
         <BottomBar sections={sections} me={me} />
         <CommandPalette sections={sections} />
+        <AboutHost version={me.server?.version} />
       </div>
     </PaletteActionsProvider>
   )

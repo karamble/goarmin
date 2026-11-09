@@ -109,3 +109,17 @@ ISC, see [LICENSE](LICENSE).
 
 The exercise figures use a body from Blender Studio's *Human Base Meshes* (CC0) and are drawn
 with three.js (MIT). Security issues: see [SECURITY.md](SECURITY.md).
+
+## Disclaimer
+
+**Use at your own risk.** goarmin is provided "as is", without warranty of any kind, express or
+implied. The authors and contributors accept no liability for any damage or loss arising from its
+use or from the inability to use it, including inaccurate, incomplete or lost data.
+
+**No medical advice.** goarmin is not a medical device. It shows what your devices recorded, as it
+reads their files; the accuracy and completeness of the data and of the values derived from it
+are not guaranteed. Do not base medical, health or training decisions on it; consult a physician.
+
+**Exercise figures.** The exercise figures are simplified visualizations of each movement, without
+equipment. This visualization is for illustrative purposes only; accuracy is not guaranteed.
+Please consult a professional instructor. Exercise at your own risk.

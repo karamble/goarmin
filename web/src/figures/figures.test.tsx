@@ -4,6 +4,7 @@
 
 import { fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FIGURE_DISCLAIMER } from '../lib/disclaimer'
 import { json, renderWith, stubApi } from '../test/fixtures'
 import type { ExercisePose } from './api'
 import { FigureDialog } from './FigureDialog'
@@ -24,7 +25,7 @@ const pose = (category: string, number: number, title: string): ExercisePose => 
 })
 
 describe('FigureDialog', () => {
-  it('steps through the exercises with the buttons and the arrow keys, and closes with Esc', () => {
+  it('steps through the exercises with the buttons and the arrow keys, and closes with Esc', async () => {
     stubApi({ '/api/exercises/core/51': json(pose('core', 51, 'Cat Cow')), '/api/exercises/plank/43': json(pose('plank', 43, 'Plank')) })
     const onClose = vi.fn()
     renderWith(<FigureDialog onClose={onClose} items={[
@@ -35,6 +36,7 @@ describe('FigureDialog', () => {
     expect(screen.getByText('10 reps')).toBeTruthy()
     expect(screen.getByText('1 of 2')).toBeTruthy()
     expect(screen.getByText(/cannot draw the 3D figure/)).toBeTruthy()
+    expect(await screen.findByText(FIGURE_DISCLAIMER)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
     expect(screen.getByRole('dialog', { name: 'Plank' })).toBeTruthy()
     fireEvent.keyDown(document, { key: 'ArrowRight' })

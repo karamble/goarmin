@@ -2,13 +2,14 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { LogOut, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
+import { Info, LogOut, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { useLogout } from '../../api/hooks/auth'
 import type { Me } from '../../api/types'
 import { Mark } from '../../ui/kit'
 import { openPalette } from '../palette/CommandPalette'
 import type { SectionDef } from '../routes'
+import { openAbout } from './About'
 import { SyncFreshness } from './SyncFreshness'
 
 /** The desktop rail: brand, sections (icon + label, collapsible to icons), the account. */
@@ -61,6 +62,16 @@ export function Rail({ sections, me, open, onToggle }: { sections: SectionDef[];
               <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-faint">{navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl'} K</kbd>
             </>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={openAbout}
+          title={open ? undefined : 'About goarmin'}
+          aria-label={open ? undefined : 'About goarmin'}
+          className="flex h-10 items-center gap-3 rounded-xl px-[17px] text-[13px] text-muted hover:bg-panel hover:text-text"
+        >
+          <Info size={18} strokeWidth={1.75} className="shrink-0" />
+          {open && <span className="flex-1 text-left">About</span>}
         </button>
         <SyncFreshness open={open} />
       </div>

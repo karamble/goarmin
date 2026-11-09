@@ -4,6 +4,7 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { FIGURE_DISCLAIMER } from '../lib/disclaimer'
 import { useExercisePose, type ExerciseInfo } from './api'
 import type { View } from './FigureCanvas'
 import { hasWebGL, useReducedMotion } from './motion'
@@ -75,6 +76,7 @@ export function FigureView({ category, number, title }: { category: string; numb
         </div>
       )}
       {pose && <p className="m-0 text-[12px] text-faint">{qualityText(pose.exercise.quality)} · drag to turn</p>}
+      {pose && <p className="m-0 text-[12px] text-faint">{FIGURE_DISCLAIMER}</p>}
     </div>
   )
 }

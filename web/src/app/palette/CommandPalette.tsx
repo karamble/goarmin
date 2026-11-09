@@ -2,7 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { Activity, CalendarCheck, CalendarSearch, CornerDownLeft, Dumbbell, LayoutGrid, LogOut, Map as MapIcon, Radio, RefreshCw, Search, SlidersHorizontal, Upload, Usb, Watch } from 'lucide-react'
+import { Activity, CalendarCheck, CalendarSearch, CornerDownLeft, Dumbbell, Info, LayoutGrid, LogOut, Map as MapIcon, Radio, RefreshCw, Search, SlidersHorizontal, Upload, Usb, Watch } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { errorText } from '../../api/client'
@@ -13,6 +13,7 @@ import { useCourses, useWorkouts } from '../../api/hooks/training'
 import { deviceName, isWatch, watchName } from '../../lib/devices'
 import { fuzzyFilter } from '../../lib/fuzzy'
 import { parseDay, shortDay, today as todayIn } from '../../lib/period'
+import { openAbout } from '../shell/About'
 import { useRegisteredActions, type PaletteItem } from './actions'
 import { useToast } from '../../ui/Toast'
 import type { SectionDef } from '../routes'
@@ -109,6 +110,7 @@ function Palette({ sections, onClose }: { sections: SectionDef[]; onClose: () =>
     out.push({ id: 'import-usb', label: 'Import from the watch on USB', hint: 'Devices › Import', icon: Usb, run: () => navigate('/devices/import#usb') })
     out.push({ id: 'customize', label: 'Customize the glance', icon: LayoutGrid, run: () => navigate('/?edit=1') })
     out.push({ id: 'prefs', label: 'Preferences', hint: 'Settings › Profile', icon: SlidersHorizontal, run: () => navigate('/settings/profile') })
+    out.push({ id: 'about', label: 'About goarmin', hint: 'source and disclaimer', icon: Info, run: openAbout })
     out.push({ id: 'logout', label: 'Sign out', icon: LogOut, run: () => logout.mutate() })
     out.push(...registered)
     for (const a of recent ?? []) {

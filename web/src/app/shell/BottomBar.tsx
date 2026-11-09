@@ -2,12 +2,13 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { LogOut, MoreHorizontal, X } from 'lucide-react'
+import { Info, LogOut, MoreHorizontal, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useLogout } from '../../api/hooks/auth'
 import type { Me } from '../../api/types'
 import type { SectionDef } from '../routes'
+import { openAbout } from './About'
 
 /** The phone bar: the main sections plus More (a sheet with the rest and sign out). */
 export function BottomBar({ sections, me }: { sections: SectionDef[]; me: Me }) {
@@ -22,7 +23,7 @@ export function BottomBar({ sections, me }: { sections: SectionDef[]; me: Me }) 
   return (
     <>
       {more && (
-        <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={() => setMore(false)} aria-hidden>
+        <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={() => setMore(false)}>
           <div
             role="dialog"
             aria-label="More sections"
@@ -41,6 +42,11 @@ export function BottomBar({ sections, me }: { sections: SectionDef[]; me: Me }) 
                   </NavLink>
                 </li>
               ))}
+              <li>
+                <button type="button" onClick={() => { setMore(false); openAbout() }} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-muted">
+                  <Info size={20} strokeWidth={1.75} /> About
+                </button>
+              </li>
               <li>
                 <button type="button" onClick={() => logout.mutate()} className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-muted">
                   <LogOut size={20} strokeWidth={1.75} /> Sign out
