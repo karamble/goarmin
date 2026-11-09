@@ -59,6 +59,23 @@ func PullRequest(uid smart.UUID, priority, window uint32) smart.FileAccess {
 	}}
 }
 
+// PushRequest offers the watch a file of type typeName (a GDXML name such as "FIT_TYPE_5")
+// under the host's id uid, as Garmin Connect does (docs/protocol/08): priority 34, a Multi-Link
+// pipe, window 15 asked for. size is the clear (uncompressed) size.
+func PushRequest(uid smart.UUID, typeName string, size uint64, window uint32) smart.FileAccess {
+	return smart.FileAccess{PushItemRequest: &smart.PushItemDataRequest{
+		Item: &smart.ItemReference{UID: smart.Ptr(uid),
+			DataType: &smart.DataType{Format: smart.Ptr(smart.FormatGDXMLDataType), GDXMLString: smart.S(typeName)},
+			DataSize: smart.U64(size)},
+		Priority:                   smart.U32(PushPriority),
+		SupportedTransports:        []smart.TransportProtocol{smart.TransportMultilinkPipe},
+		RequestedCompressionWindow: smart.U32(window),
+	}}
+}
+
+// PushPriority is the priority Garmin Connect gives its pushes.
+const PushPriority = 34
+
 // ArchiveRequest flags an item as synced.
 func ArchiveRequest(uid smart.UUID) smart.FileAccess {
 	return smart.FileAccess{ModifyFlagsRequest: &smart.ModifyFlagsRequest{UID: smart.Ptr(uid), SetFlags: []smart.UUID{smart.SyncedFlag}}}
@@ -67,7 +84,13 @@ func ArchiveRequest(uid smart.UUID) smart.FileAccess {
 // DeleteRequest asks the watch to delete an item it offered for pulling. No other client is
 // known to send it (docs/protocol/04 §3.7).
 func DeleteRequest(uid smart.UUID) smart.FileAccess {
-	return smart.FileAccess{DeleteItemRequest: &smart.DeleteItemRequest{UID: smart.Ptr(uid), Direction: smart.Ptr(smart.DirectionPull)}}
+	return DeleteRequestIn(uid, smart.DirectionPull)
+}
+
+// DeleteRequestIn asks the watch to delete an item, naming the direction it came in: pull for
+// an item the watch offered, push for one the host pushed.
+func DeleteRequestIn(uid smart.UUID, dir smart.TransferDirection) smart.FileAccess {
+	return smart.FileAccess{DeleteItemRequest: &smart.DeleteItemRequest{UID: smart.Ptr(uid), Direction: smart.Ptr(dir)}}
 }
 
 // TransferStatusReply answers the watch's TransferStatusRequest with the priority of the

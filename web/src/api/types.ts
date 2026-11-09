@@ -304,8 +304,9 @@ export interface WorkoutStep {
   weight_kg?: number
 }
 
-/** Where a stored workout came from: a watch's workout file, or a Garmin Connect export. */
-export type WorkoutOrigin = 'watch' | 'garmin_connect'
+/** Where a stored workout came from: a watch's workout file, a Garmin Connect export, or
+ * goarmin itself (a workout renamed or edited here). */
+export type WorkoutOrigin = 'goarmin' | 'watch' | 'garmin_connect'
 
 /** Where a library workout is, seen from one watch: on it now, removed from it (on the watch or
  * by Garmin Connect), never on it, or not known yet (the watch has not been checked). */

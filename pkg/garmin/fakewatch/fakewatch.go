@@ -82,6 +82,8 @@ type Faults struct {
 	// RefuseTypedListings answers a listing filtered by data type with
 	// FAIL_INVALID_DATA_TYPE, as a watch might that knows no such filter.
 	RefuseTypedListings bool
+	// PushResult, if it returns ok, answers PushItemDataRequest with that result instead.
+	PushResult func(typeName string, attempt int) (r smart.ItemAccessResult, ok bool)
 }
 
 // Options configures a fake watch. The zero value is a Fenix 8 on firmware 23.40.
@@ -124,19 +126,33 @@ type Watch struct {
 	stats     Stats
 	conn      *conn  // the connection being served, if any
 	unwritten []File // wellness data the watch writes out on a CutWellnessFilesRequest
+	schedules [][]byte
+}
+
+// Schedules returns the schedule files pushed to the watch, in order. The watch takes them
+// into its calendar and lists none of them, as the Fenix 8 does.
+func (w *Watch) Schedules() [][]byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([][]byte, len(w.schedules))
+	for i, b := range w.schedules {
+		out[i] = bytes.Clone(b)
+	}
+	return out
 }
 
 // Stats counts what hosts did.
 type Stats struct {
-	Connections, Listings, Pages, Pulls, Archives, Cancels, Deletes, Cuts int
-	BytesSent                                                             int
-	TimeReply                                                             []byte // data of the last CURRENT_TIME RESPONSE
-	HostCaps                                                              gfdi.Capabilities
-	HostInfo                                                              []byte // data of the DEVICE_INFORMATION RESPONSE
-	PipeServices                                                          []multilink.Service
-	SystemEvents                                                          []byte // the event of each SYSTEM_EVENT, in order
-	FeatureRequests                                                       int    // FeatureCapabilitiesRequests answered
-	TypedListings                                                         int    // listings filtered by data type
+	Connections, Listings, Pages, Pulls, Archives, Cancels, Deletes, Cuts, Pushes int
+	BytesSent                                                                     int
+	TimeReply                                                                     []byte // data of the last CURRENT_TIME RESPONSE
+	HostCaps                                                                      gfdi.Capabilities
+	HostInfo                                                                      []byte // data of the DEVICE_INFORMATION RESPONSE
+	PipeServices                                                                  []multilink.Service
+	SystemEvents                                                                  []byte    // the event of each SYSTEM_EVENT, in order
+	FeatureRequests                                                               int       // FeatureCapabilitiesRequests answered
+	TypedListings                                                                 int       // listings filtered by data type
+	PushHeaders                                                                   [][2]byte // the zlib header of each push
 }
 
 // New returns a fake watch without files.
@@ -350,6 +366,11 @@ type transfer struct {
 	f       *File
 	attempt int
 	handle  uint32
+	// A push: what the host offered.
+	push     bool
+	typeName string
+	size     uint64
+	hostUID  smart.UUID
 }
 
 func (c *conn) startGFDI(ch *multilink.Channel) {
@@ -477,6 +498,8 @@ func (c *conn) onProtobuf(_ *gfdi.Session, m gfdi.ProtobufMessage) gfdi.Protobuf
 		return fileAccessReply(smart.FileAccess{ModifyFlagsResponse: resp})
 	case fa.DeleteItemRequest != nil:
 		return fileAccessReply(smart.FileAccess{DeleteItemResponse: c.deleteItem(fa.DeleteItemRequest)})
+	case fa.PushItemRequest != nil:
+		return fileAccessReply(smart.FileAccess{PushItemResponse: c.push(fa.PushItemRequest)})
 	case fa.CancelTransferRequest != nil:
 		c.w.mu.Lock()
 		c.w.stats.Cancels++
@@ -620,7 +643,11 @@ func (c *conn) servePipe(ch *multilink.Channel) {
 	delete(c.transfers, handle)
 	sess := c.sess
 	c.mu.Unlock()
-	if t == nil || cfg[0] != 0 || cfg[1] != 0 {
+	if t != nil && t.push && cfg[0] == 0 && cfg[1] == 1 {
+		c.receivePush(ctx, ch, sess, t, cfg[6:])
+		return
+	}
+	if t == nil || t.push || cfg[0] != 0 || cfg[1] != 0 {
 		_ = ch.Write([]byte{1, 0, 0})
 		return
 	}
@@ -652,6 +679,98 @@ func (c *conn) servePipe(ch *multilink.Channel) {
 	c.w.stats.BytesSent += len(body)
 	c.w.mu.Unlock()
 	c.transferStatus(ctx, sess, t, nil)
+}
+
+// push answers a PushItemDataRequest as the Fenix 8 did: a handle and window 11.
+func (c *conn) push(req *smart.PushItemDataRequest) *smart.PushItemDataResponse {
+	w := c.w
+	if req.Item == nil || req.Item.UID == nil || req.Item.DataType == nil || req.Item.DataType.GDXMLString == nil || req.Item.DataSize == nil {
+		return &smart.PushItemDataResponse{Result: smart.Ptr(smart.ItemAccessUnknownItem)}
+	}
+	name := *req.Item.DataType.GDXMLString
+	w.mu.Lock()
+	n := w.attempts["push "+name]
+	w.attempts["push "+name] = n + 1
+	w.mu.Unlock()
+	if hook := w.opt.Faults.PushResult; hook != nil {
+		if r, ok := hook(name, n); ok {
+			return &smart.PushItemDataResponse{Result: smart.Ptr(r)}
+		}
+	}
+	c.mu.Lock()
+	handle := c.nextHandle
+	c.nextHandle++
+	c.transfers[handle] = &transfer{push: true, typeName: name, size: *req.Item.DataSize, hostUID: *req.Item.UID, handle: handle}
+	c.mu.Unlock()
+	return &smart.PushItemDataResponse{
+		Result: smart.Ptr(smart.ItemAccessSuccess), Offset: smart.U64(0), Transport: smart.Ptr(smart.TransportMultilinkPipe),
+		TransferHandle: smart.U32(handle), CompressionWindow: smart.U32(w.opt.CompressionWindow),
+	}
+}
+
+// receivePush takes a pushed file: the configure reply, the zlib stream until the host closes
+// the pipe, then the transfer status. A workout is filed under the watch's own id and
+// announced; a schedule goes to the calendar, unlisted.
+func (c *conn) receivePush(ctx context.Context, ch *multilink.Channel, sess *gfdi.Session, t *transfer, first []byte) {
+	_ = ch.Write([]byte{0, 0, 0})
+	body := append([]byte(nil), first...)
+	for done := false; !done; {
+		select {
+		case p, ok := <-ch.Recv():
+			if !ok {
+				done = true
+				continue
+			}
+			body = append(body, p...)
+		case <-ctx.Done():
+			return
+		}
+	}
+	var failure *smart.FailureReason
+	data, err := inflateWithin(body, c.w.opt.CompressionWindow)
+	if err != nil || uint64(len(data)) != t.size {
+		c.w.log.Debug("fakewatch: bad push", "type", t.typeName, "err", err, "got", len(data), "want", t.size)
+		failure = smart.Ptr(smart.FailureTransportFailed)
+	}
+	// The watch holds the file before it reports the transfer done; a workout is announced
+	// after the report.
+	w := c.w
+	if failure == nil {
+		w.mu.Lock()
+		w.stats.Pushes++
+		if len(body) >= 2 {
+			w.stats.PushHeaders = append(w.stats.PushHeaders, [2]byte{body[0], body[1]})
+		}
+		if t.typeName == "FIT_TYPE_7" {
+			w.schedules = append(w.schedules, data)
+		}
+		w.mu.Unlock()
+	}
+	req := smart.FileAccess{TransferStatusRequest: &smart.TransferStatusRequest{
+		UID: smart.Ptr(t.hostUID), TransferHandle: smart.U32(t.handle), FailureReason: failure,
+	}}
+	if _, err := sess.Call(ctx, req.Smart()); err != nil {
+		w.log.Debug("fakewatch: TransferStatusRequest", "err", err)
+	}
+	if failure == nil && t.typeName != "FIT_TYPE_7" {
+		w.AddFile(t.typeName, data)
+	}
+}
+
+// inflateWithin inflates a zlib stream, refusing one whose header declares a window larger
+// than 2^window bytes, as a watch with a small buffer must.
+func inflateWithin(body []byte, window uint32) ([]byte, error) {
+	if len(body) < 2 {
+		return nil, errors.New("short stream")
+	}
+	if cinfo := uint32(body[0]>>4) + 8; body[0]&0x0f != 8 || cinfo > window {
+		return nil, fmt.Errorf("zlib header %02x %02x declares a window of 2^%d, more than 2^%d", body[0], body[1], cinfo, window)
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(zr)
 }
 
 func (c *conn) transferStatus(ctx context.Context, sess *gfdi.Session, t *transfer, failure *smart.FailureReason) {

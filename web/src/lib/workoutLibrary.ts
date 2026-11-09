@@ -14,12 +14,19 @@ export function sportWords(sport: string, sub?: string): string {
   return sport ? w(sport) : 'Workout'
 }
 
-export const originWords: Record<WorkoutOrigin, string> = { watch: 'From a watch', garmin_connect: 'From Garmin Connect' }
+export const originWords: Record<WorkoutOrigin, string> = {
+  goarmin: 'Edited in goarmin',
+  watch: 'From a watch',
+  garmin_connect: 'From Garmin Connect',
+}
 
 /** originText says where a workout's versions came from. */
 export function originText(origins: WorkoutOrigin[]): string {
-  if (origins.includes('watch') && origins.includes('garmin_connect')) return 'From a watch and Garmin Connect'
-  return origins.includes('watch') ? originWords.watch : originWords.garmin_connect
+  const from = origins.includes('watch') && origins.includes('garmin_connect') ? 'From a watch and Garmin Connect'
+    : origins.includes('watch') ? originWords.watch
+      : origins.includes('garmin_connect') ? originWords.garmin_connect : ''
+  if (!origins.includes('goarmin')) return from
+  return from ? `${originWords.goarmin}, ${from[0].toLowerCase()}${from.slice(1)}` : originWords.goarmin
 }
 
 /** presenceText says where a workout is on one watch: short for a badge among others (the

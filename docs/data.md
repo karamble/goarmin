@@ -104,6 +104,10 @@ or not:
   watch while it is listed, and *removed* once it no longer is (deleted on the watch, or by
   Garmin Connect). A workout file is stored under its item's id (`<uid>.fit`), so a listed item
   finds its workout; the same bytes sent to the watch again under a new item find it too.
+- **Renamed in goarmin.** A rename (or a new description) is goarmin's own version of the
+  workout (origin `goarmin`, no file), one per workout, shown in place of the others; the
+  originals stay, and *Back to the original* drops the rename. The workout stays one entry
+  (`workouts.entry_key`), also when the watch later hands back a file under the new name.
 
 ## Time and days
 

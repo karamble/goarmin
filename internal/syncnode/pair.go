@@ -308,37 +308,59 @@ func identifyWith(ctx context.Context, opt IdentifyOptions, open watch.Opener, p
 	return id, nil
 }
 
-// TakeStock connects to the watch, runs the handshake and lists every item of the given GDXML
-// types it keeps ("FIT_TYPE_5": its workouts), synced or not, then disconnects. It is read-only:
-// nothing is fetched, flagged or saved.
+// TakeStock connects to a watch, runs the handshake and lists every item of the given types
+// it keeps (read-only), for goarmin probe -inventory.
 func TakeStock(ctx context.Context, opt IdentifyOptions, types []string) (Identity, []fileaccess.Item, error) {
+	var items []fileaccess.Item
+	id, err := WithEngine(ctx, opt, func(ctx context.Context, eng *fileaccess.Engine) error {
+		var err error
+		items, err = eng.Inventory(ctx, types)
+		return err
+	})
+	return id, items, err
+}
+
+// takeStockWith is TakeStock after the Bluetooth connection.
+func takeStockWith(ctx context.Context, opt IdentifyOptions, types []string, open watch.Opener, pairs []int) (Identity, []fileaccess.Item, error) {
+	var items []fileaccess.Item
+	id, err := withEngineOn(ctx, opt, open, pairs, func(ctx context.Context, eng *fileaccess.Engine) error {
+		var err error
+		items, err = eng.Inventory(ctx, types)
+		return err
+	})
+	return id, items, err
+}
+
+// WithEngine connects to a watch, runs the handshake and gives fn a FileAccess engine on the
+// connection: for one-off jobs outside a sync (taking stock, pushing or removing a file).
+func WithEngine(ctx context.Context, opt IdentifyOptions, fn func(context.Context, *fileaccess.Engine) error) (Identity, error) {
 	id := Identity{Address: opt.Address, Battery: noBattery}
 	bz, err := bluez.Open()
 	if err != nil {
-		return id, nil, err
+		return id, err
 	}
 	defer bz.Close()
 	gw, err := gattlink.Connect(ctx, bz, opt.Adapter, opt.Address)
 	if err != nil {
-		return id, nil, err
+		return id, err
 	}
 	defer func() {
 		dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = gw.Disconnect(dctx)
 	}()
-	return takeStockWith(ctx, opt, types, gw.Open, gw.Pairs)
+	return withEngineOn(ctx, opt, gw.Open, gw.Pairs, fn)
 }
 
-// takeStockWith is TakeStock after the Bluetooth connection.
-func takeStockWith(ctx context.Context, opt IdentifyOptions, types []string, open watch.Opener, pairs []int) (Identity, []fileaccess.Item, error) {
+// withEngineOn is WithEngine after the Bluetooth connection.
+func withEngineOn(ctx context.Context, opt IdentifyOptions, open watch.Opener, pairs []int, fn func(context.Context, *fileaccess.Engine) error) (Identity, error) {
 	id := Identity{Address: opt.Address, Battery: noBattery}
 	if opt.Logger == nil {
 		opt.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	d, err := dial(ctx, opt.DataDir, opt.Address, open, pairs, watch.Options{Location: opt.Location, Logger: opt.Logger})
 	if err != nil {
-		return id, nil, err
+		return id, err
 	}
 	defer d.closer.Close()
 	defer d.conn.Close()
@@ -346,8 +368,7 @@ func takeStockWith(ctx context.Context, opt IdentifyOptions, types []string, ope
 	id.Record = recordOf(d.conn.Device, d.pair, d.client)
 	eng := fileaccess.New(d.conn, fileaccess.NewMemStore(), fileaccess.Options{Logger: opt.Logger})
 	defer eng.Close()
-	items, err := eng.Inventory(ctx, types)
-	return id, items, err
+	return id, fn(ctx, eng)
 }
 
 // BluezPairer pairs and identifies watches with this computer's BlueZ: the server's wizard

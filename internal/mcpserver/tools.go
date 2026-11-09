@@ -149,6 +149,16 @@ var Tools = []Tool{
 		Desc: "The workout library: every workout from the watches and from Garmin Connect, once each, with whether each watch has it on it."},
 	{Name: "get_workout", Title: "A workout", Area: "Training", Level: Read, Method: "GET", Path: "/api/workouts/{id}", ReadOnly: true,
 		Desc: "One workout's steps (durations, targets, repeats, exercises) and its versions.", Args: []Arg{id("the workout's id (list_workouts)")}},
+	{Name: "rename_workout", Title: "Rename a workout", Area: "Training", Level: Write, Method: "PATCH", Path: "/api/workouts/{id}", Idempotent: true,
+		Desc: "Rename a library workout or change its description. goarmin keeps its own version (origin goarmin) with the steps unchanged; the library shows it and sends it to a watch in place of the original.",
+		Args: []Arg{
+			id("the workout's id (list_workouts)"),
+			{Name: "name", In: InBody, Type: "string", Desc: "the new name, at most 40 characters"},
+			{Name: "description", In: InBody, Type: "string", Desc: "the new description, at most 1,000 characters"},
+		}},
+	{Name: "discard_workout_edit", Title: "Undo a workout's rename or edit", Area: "Training", Level: Write, Method: "DELETE", Path: "/api/workouts/{id}", Destructive: true, Idempotent: true,
+		Desc: "Remove goarmin's own version of a workout (its id is the version of origin goarmin in get_workout's versions); the library shows the original again. A watch's or Garmin Connect's version cannot be removed.",
+		Args: []Arg{id("the id of the workout's goarmin version")}},
 	{Name: "list_exercises", Title: "Exercises", Area: "Training", Level: Read, Method: "GET", Path: "/api/exercises", ReadOnly: true,
 		Desc: "Garmin's exercise catalogue (1,846 exercises in 51 categories) by category and number, the way workout steps name them. Filter it: the whole list is large.",
 		Args: []Arg{

@@ -2,7 +2,7 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, request } from '../client'
 import { keys } from '../keys'
 import type { Activity, ActivityDetail, ActivityPage, Course, Neighbours, Streams, Totals, WatchProfile, Workout, ZonesInfo } from '../types'
@@ -86,6 +86,23 @@ export function useWorkouts() {
 /** useWorkout is one workout with its steps (null when it is not there). */
 export function useWorkout(id: number) {
   return useQuery({ queryKey: keys.workout(id), queryFn: () => nullOn404(request<Workout>('GET', `/workouts/${id}`)), enabled: id > 0 })
+}
+
+/** useWorkoutEdits renames a workout or changes its description (goarmin keeps its own
+ * version), and undoes that again. Both refresh the library, its workouts and the calendar. */
+export function useWorkoutEdits() {
+  const qc = useQueryClient()
+  const done = () => {
+    void qc.invalidateQueries({ queryKey: keys.workouts })
+    void qc.invalidateQueries({ queryKey: keys.calendarAll })
+  }
+  return {
+    rename: useMutation({
+      mutationFn: ({ id, ...body }: { id: number; name?: string; description?: string }) => request<Workout>('PATCH', `/workouts/${id}`, body),
+      onSuccess: done,
+    }),
+    undo: useMutation({ mutationFn: (id: number) => request<void>('DELETE', `/workouts/${id}`), onSuccess: done }),
+  }
 }
 
 export function useCourses() {

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +101,26 @@ func TestWorkoutLibraryThroughANode(t *testing.T) {
 	d := decodeJSON[map[string]any](t, admin.want(200, "GET", "/api/workouts/"+fmt.Sprint(x["id"]), nil))
 	if vs, _ := d["versions"].([]any); len(vs) != 1 || len(d["steps"].([]any)) != 1 || watch(d)["state"] != "removed" {
 		t.Fatalf("detail %v", d)
+	}
+
+	// Renamed in goarmin: its own version, shown in the library; the original stays.
+	id := fmt.Sprint(x["id"])
+	r := decodeJSON[map[string]any](t, admin.want(200, "PATCH", "/api/workouts/"+id, map[string]any{"name": "  Easy   Run 30 ", "description": "Slow"}))
+	if r["name"] != "Easy Run 30" || r["origin"] != "goarmin" || r["description"] != "Slow" || len(r["versions"].([]any)) != 2 ||
+		watch(r)["state"] != "removed" || len(r["steps"].([]any)) != 1 {
+		t.Fatalf("renamed: %v", r)
+	}
+	if x := library(); x["name"] != "Easy Run 30" || x["id"] != r["id"] {
+		t.Fatalf("the library after the rename: %v", x)
+	}
+	admin.want(400, "PATCH", "/api/workouts/"+id, map[string]any{"name": "   "})
+	admin.want(400, "PATCH", "/api/workouts/"+id, map[string]any{"name": strings.Repeat("x", 41)})
+	admin.want(400, "PATCH", "/api/workouts/"+id, map[string]any{})
+	admin.want(404, "PATCH", "/api/workouts/999999", map[string]any{"name": "x"})
+	admin.want(404, "DELETE", "/api/workouts/"+id, nil) // the watch's original
+	admin.want(204, "DELETE", "/api/workouts/"+fmt.Sprint(r["id"]), nil)
+	if x := library(); x["name"] != "Easy Run" || x["origin"] != "watch" {
+		t.Fatalf("the edit undone: %v", x)
 	}
 
 	// Bob's node may not report for the admin's watch; an inventory needs its types and time.

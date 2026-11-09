@@ -96,12 +96,17 @@ func (s *Store) WriteWatchFile(ctx context.Context, f RawFile, w *fitwatch.File)
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			entry, err := entryKeyOf(ctx, tx, f.UserID, wk.Name, wk.Sport)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (user_id, origin, device_id, name, sport) DO UPDATE SET sub_sport = excluded.sub_sport, steps = excluded.steps,
-					estimated_s = excluded.estimated_s, recorded_at = excluded.recorded_at, raw_file_id = excluded.raw_file_id
+					estimated_s = excluded.estimated_s, recorded_at = excluded.recorded_at, raw_file_id = excluded.raw_file_id,
+					entry_key = CASE WHEN excluded.entry_key <> '' THEN excluded.entry_key ELSE workouts.entry_key END
 				WHERE excluded.recorded_at >= workouts.recorded_at`,
-				f.UserID, OriginWatch, f.DeviceID, wk.Name, wk.Sport, wk.SubSport, steps, wk.EstimatedS, at, f.ID); err != nil {
+				f.UserID, OriginWatch, f.DeviceID, entry, wk.Name, wk.Sport, wk.SubSport, steps, wk.EstimatedS, at, f.ID); err != nil {
 				return err
 			}
 			// Every version is named, also one a newer file replaces above: the watch may keep it.
@@ -271,22 +276,49 @@ func (s *Store) LifetimeTotals(ctx context.Context, user int64) ([]TotalsRow, er
 const (
 	OriginWatch         = "watch"          // a watch's workout file
 	OriginGarminConnect = "garmin_connect" // a Garmin Connect export's workout list
+	OriginGoarmin       = "goarmin"        // renamed or edited in goarmin (no file)
 )
 
 // WorkoutRow is a stored workout.
 type WorkoutRow struct {
 	ID          int64
-	Origin      string // OriginWatch, OriginGarminConnect
-	DeviceID    int64  // the watch it came from (0: unknown, or Garmin Connect)
+	Origin      string // OriginWatch, OriginGarminConnect, OriginGoarmin
+	DeviceID    int64  // the watch it came from (0: unknown, Garmin Connect or goarmin)
 	Description string
 	RecordedAt  time.Time
+	// EntryKey is the library entry the version belongs to: the key of its name and sport
+	// (WorkoutKey), or of the entry a renamed workout began in.
+	EntryKey string
 	fitwatch.Workout
+}
+
+// entryKeyOf is the library entry a new version of a workout named name in sport joins: the
+// entry of user's goarmin version of that name and sport (a renamed workout, handed back by a
+// watch that goarmin sent it to), or "" (its own name's key).
+func entryKeyOf(ctx context.Context, tx *sql.Tx, user int64, name, sport string) (string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT entry_key, name FROM workouts WHERE user_id = ? AND origin = ? AND sport = ?`,
+		user, OriginGoarmin, sport)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	want := WorkoutKey(name, sport)
+	for rows.Next() {
+		var entry, n string
+		if err := rows.Scan(&entry, &n); err != nil {
+			return "", err
+		}
+		if WorkoutKey(n, sport) == want {
+			return entry, nil
+		}
+	}
+	return "", rows.Err()
 }
 
 // Workouts returns user's stored workouts by name, every version of each; with id > 0 only that
 // one (or ErrNotFound).
 func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, error) {
-	q := `SELECT id, origin, device_id, description, name, sport, sub_sport, steps, estimated_s, recorded_at FROM workouts WHERE user_id = ?`
+	q := `SELECT id, origin, device_id, description, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at FROM workouts WHERE user_id = ?`
 	args := []any{user}
 	if id > 0 {
 		q += ` AND id = ?`
@@ -302,10 +334,13 @@ func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, err
 		var r WorkoutRow
 		var steps string
 		var at int64
-		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at); err != nil {
+		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.EntryKey, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at); err != nil {
 			return nil, err
 		}
 		r.RecordedAt = time.Unix(at, 0)
+		if r.EntryKey == "" {
+			r.EntryKey = WorkoutKey(r.Name, r.Sport)
+		}
 		if err := json.Unmarshal([]byte(steps), &r.Steps); err != nil {
 			return nil, err
 		}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -252,8 +253,11 @@ func resolvePlan(lib store.Library, p store.WorkoutPlan) *store.LibraryWorkout {
 		}
 	}
 	for i := range lib.Workouts {
-		if store.WorkoutKey(lib.Workouts[i].Name, lib.Workouts[i].Sport) == key {
-			return &lib.Workouts[i]
+		w := &lib.Workouts[i]
+		if store.WorkoutKey(w.Name, w.Sport) == key || slices.ContainsFunc(w.Versions, func(v store.WorkoutRow) bool {
+			return store.WorkoutKey(v.Name, v.Sport) == key // a renamed workout by its old name
+		}) {
+			return w
 		}
 	}
 	return nil

@@ -49,6 +49,8 @@ describe('workout library', () => {
     expect(presenceText(fenix('unknown')).long).toBe('Fenix 8 has not been checked yet')
     expect(originText(['watch', 'garmin_connect'])).toBe('From a watch and Garmin Connect')
     expect(originText(['garmin_connect'])).toBe('From Garmin Connect')
+    expect(originText(['goarmin', 'watch'])).toBe('Edited in goarmin, from a watch')
+    expect(originText(['goarmin'])).toBe('Edited in goarmin')
     expect(sportWords('fitness_equipment', 'pilates')).toBe('Pilates')
     expect(sportWords('mobility', 'generic')).toBe('Mobility')
     expect(sportWords('hiit', 'generic')).toBe('HIIT')

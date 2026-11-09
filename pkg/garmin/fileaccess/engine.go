@@ -148,7 +148,8 @@ type Engine struct {
 	keys      map[uint32]string // gdxml_string_key → type name, for the whole connection
 	transfers map[uint32]chan *smart.TransferStatusRequest
 	added     bool
-	addedSig  chan struct{} // signalled on ItemAddedNotification
+	addedSig  chan struct{}              // signalled on ItemAddedNotification
+	addedSubs []chan smart.ItemReference // pushes waiting for their file's announcement
 	running   bool
 	more      bool // another pull follows the current one
 }
@@ -233,6 +234,12 @@ func (e *Engine) onMessage(_ gfdi.ProtobufMessage, env smart.Envelope) (gfdi.Pro
 		e.mu.Lock()
 		for _, ref := range fa.ItemAdded.Items {
 			e.learnKeyLocked(ref)
+			for _, c := range e.addedSubs {
+				select {
+				case c <- ref:
+				default:
+				}
+			}
 		}
 		e.added = true
 		e.mu.Unlock()
@@ -760,7 +767,24 @@ func (e *Engine) Delete(ctx context.Context, uid smart.UUID, isStored func(smart
 }
 
 func (e *Engine) deleteItem(ctx context.Context, uid smart.UUID) error {
-	resp, err := e.call(ctx, DeleteRequest(uid))
+	return e.deleteItemIn(ctx, uid, smart.DirectionPull)
+}
+
+// DeletePushed deletes an item the host pushed to the watch (a workout, a schedule), naming
+// the push direction.
+func (e *Engine) DeletePushed(ctx context.Context, uid smart.UUID) error {
+	err := e.deleteItemIn(ctx, uid, smart.DirectionPush)
+	if errors.Is(err, errGone) {
+		return ErrNotOnWatch
+	}
+	return err
+}
+
+// ErrNotOnWatch is DeletePushed's answer when the watch has no such item.
+var ErrNotOnWatch = errors.New("fileaccess: the watch has no such item")
+
+func (e *Engine) deleteItemIn(ctx context.Context, uid smart.UUID, dir smart.TransferDirection) error {
+	resp, err := e.call(ctx, DeleteRequestIn(uid, dir))
 	if err != nil {
 		return fmt.Errorf("fileaccess: delete %s: %w", uid, err)
 	}

@@ -273,6 +273,29 @@ describe('watch data', () => {
     expect(screen.getByRole('img', { name: /^Intensity over the workout: warmup, active, recovery, active/ })).toBeTruthy()
   })
 
+  it('renames a workout, and goes back to the original', async () => {
+    const renamed = { ...workout, id: 12, name: '6 × 400 m fast', origin: 'goarmin', origins: ['goarmin', 'watch', 'garmin_connect'] }
+    let shown: object = workout
+    const fn = stubApi({
+      '/api/workouts/4': () => json(shown)(),
+      '/api/workouts/12': () => json(renamed)(),
+    })
+    const calls = () => fn.mock.calls as unknown as [string, RequestInit | undefined][]
+    page(<Workout />, '/training/workouts/4', '/training/workouts/:id')
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename' }))
+    const name = screen.getByRole('textbox', { name: /^Name/ })
+    fireEvent.change(name, { target: { value: '  6 × 400 m   fast ' } })
+    shown = renamed
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls().some(([u, init]) => u.endsWith('/api/workouts/4') && init?.method === 'PATCH')).toBe(true))
+    const call = calls().find(([, init]) => init?.method === 'PATCH')!
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ name: '6 × 400 m fast', description: 'Short and fast' })
+    expect(await screen.findByText(/^Renamed in goarmin/)).toBeTruthy()
+    expect(screen.getByText('Edited in goarmin, from a watch and Garmin Connect')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the original' }))
+    await waitFor(() => expect(calls().some(([u, init]) => u.endsWith('/api/workouts/12') && init?.method === 'DELETE')).toBe(true))
+  })
+
   it('is a library: every workout with where it is, searchable and filtered', async () => {
     const lib = [
       { ...workout, steps: undefined, versions: undefined },

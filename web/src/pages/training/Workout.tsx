@@ -2,12 +2,12 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { CalendarPlus, PersonStanding, Repeat } from 'lucide-react'
+import { CalendarPlus, Pencil, PersonStanding, Repeat, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
-import { useWorkout } from '../../api/hooks/training'
-import type { WorkoutStep } from '../../api/types'
+import { useWorkout, useWorkoutEdits } from '../../api/hooks/training'
+import type { Workout, WorkoutStep } from '../../api/types'
 import { usePlanActions } from '../../api/hooks/calendar'
 import { HeaderActions, useSectionTitle } from '../../app/section/HeaderSlot'
 import { useToday } from '../../app/section/usePeriod'
@@ -27,6 +27,9 @@ export default function WorkoutPage() {
   const units = useMe().data?.units ?? 'metric'
   const [figure, setFigure] = useState<number | null>(null)
   const [planning, setPlanning] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const { undo } = useWorkoutEdits()
+  const toast = useToast()
   useSectionTitle(q.data?.name)
   if (!(id > 0)) return <NotFound />
   return (
@@ -46,12 +49,17 @@ export default function WorkoutPage() {
         return (
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
             <HeaderActions>
+              <button type="button" onClick={() => setRenaming(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-muted hover:border-lime hover:text-text">
+                <Pencil size={14} aria-hidden /> Rename
+              </button>
               <button type="button" onClick={() => setPlanning(true)}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-lime hover:border-lime">
                 <CalendarPlus size={14} aria-hidden /> Plan
               </button>
             </HeaderActions>
             {planning && <PlanOn id={w.id} name={w.name} onClose={() => setPlanning(false)} />}
+            {renaming && <Rename w={w} onClose={() => setRenaming(false)} />}
             <section className="card p-5 sm:p-6">
               <Kpis items={[
                 { label: 'Sport', value: sportWords(w.sport, w.sub_sport) },
@@ -90,7 +98,18 @@ export default function WorkoutPage() {
                 ))}
               </ol>
               <p className="m-0 mt-4 text-[12px] text-faint">
-                {w.origin === 'watch' ? 'As saved on the watch' : 'As saved in Garmin Connect'}, {new Date(w.recorded_at * 1000).toLocaleDateString()}.
+                {w.origin === 'goarmin' ? 'Renamed in goarmin' : w.origin === 'watch' ? 'As saved on the watch' : 'As saved in Garmin Connect'},{' '}
+                {new Date(w.recorded_at * 1000).toLocaleDateString()}.
+                {w.origin === 'goarmin' && (
+                  <button type="button" disabled={undo.isPending}
+                    onClick={() => undo.mutate(w.id, {
+                      onSuccess: () => toast({ text: 'Back to the original name' }),
+                      onError: (e) => toast({ text: `Not undone: ${(e as Error).message}`, tone: 'error' }),
+                    })}
+                    className="ml-2 inline-flex items-center gap-1 text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-50">
+                    <Undo2 size={12} aria-hidden /> Back to the original
+                  </button>
+                )}
               </p>
             </Card>
             {figure !== null && figures.length > 0 && <FigureDialog items={figures} start={figure} onClose={() => setFigure(null)} />}
@@ -98,6 +117,45 @@ export default function WorkoutPage() {
         )
       }}
     </Loaded>
+  )
+}
+
+/** Rename gives a workout another name or description. goarmin keeps it as its own version;
+ * the original from the watch or Garmin Connect stays, and can be shown again. */
+function Rename({ w, onClose }: { w: Workout; onClose: () => void }) {
+  const [name, setName] = useState(w.name)
+  const [description, setDescription] = useState(w.description ?? '')
+  const { rename } = useWorkoutEdits()
+  const toast = useToast()
+  const clean = name.trim().replace(/\s+/g, ' ')
+  const changed = clean !== w.name || description.trim() !== (w.description ?? '')
+  const submit = () => rename.mutate({ id: w.id, name: clean, description: description.trim() }, {
+    onSuccess: () => {
+      toast({ text: `Renamed to ${clean}` })
+      onClose()
+    },
+    onError: (e) => toast({ text: `Not renamed: ${(e as Error).message}`, tone: 'error' }),
+  })
+  const field = 'w-full rounded-lg border border-border bg-bg2 px-3 py-2 text-[14px] text-text focus:border-lime focus:outline-none'
+  return (
+    <Sheet title={`Rename ${w.name}`} onClose={onClose}
+      footer={<button type="button" onClick={submit} disabled={!clean || !changed || rename.isPending}
+        className="rounded-full bg-lime px-4 py-2 text-[14px] font-medium text-bg disabled:opacity-50">Save</button>}>
+      <div className="grid gap-4">
+        <label className="grid gap-1 text-[13px] text-muted">
+          Name
+          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} className={field} />
+          <span className="text-[12px] text-faint">{clean.length} of 40 characters, as many as a watch shows</span>
+        </label>
+        <label className="grid gap-1 text-[13px] text-muted">
+          Description
+          <textarea value={description} maxLength={1000} rows={4} onChange={(e) => setDescription(e.target.value)} className={field} />
+        </label>
+        <p className="m-0 text-[13px] text-muted">
+          The steps stay as they are. goarmin keeps the original too, and sends this version when it puts the workout on a watch.
+        </p>
+      </div>
+    </Sheet>
   )
 }
 

@@ -9,8 +9,8 @@
 //
 // It prints a timeline of Multi-Link control messages and GFDI messages. With -proto it also
 // decodes every Smart protobuf message field by field against the Garmin .proto files that
-// Gadgetbridge ships. With -out it inflates every file pulled over a Multi-Link file pipe and
-// writes it to that directory. See docs/protocol/05-fenix8-capture.md for what it found.
+// Gadgetbridge ships. With -out it inflates every file pulled or pushed over a Multi-Link file
+// pipe and writes it to that directory. See docs/protocol/05-fenix8-capture.md for what it found.
 //
 // Usage:
 //
@@ -901,13 +901,20 @@ func (a *analysis) finishPipe(h byte, ts time.Time) {
 		note = fmt.Sprintf(" (inflate stopped: %v)", err)
 	}
 	fit := len(plain) >= 12 && string(plain[8:12]) == ".FIT"
-	a.logf(ts, "PIPE %s token=0x%04x %s: zlib %d -> %d bytes, FIT=%v, head % x%s", svcName(p.svc), p.token, what, len(data), len(plain), fit, head(plain, 14), note)
-	if pullDir != "" && p.dir == 0 && len(plain) > 0 {
+	a.logf(ts, "PIPE %s token=0x%04x %s: zlib %d -> %d bytes (zlib header % x), FIT=%v, head % x%s", svcName(p.svc), p.token, what,
+		len(data), len(plain), head(data, 2), fit, head(plain, 14), note)
+	if pullDir != "" && len(plain) > 0 {
 		ext := ".bin"
 		if fit {
 			ext = ".fit"
 		}
+		// Pulled files keep their old names; pushed ones (what the host sent the watch) are
+		// push_<token>.
+		name := fmt.Sprintf("token_%04x%s", p.token, ext)
+		if p.dir == 1 {
+			name = fmt.Sprintf("push_%04x%s", p.token, ext)
+		}
 		_ = os.MkdirAll(pullDir, 0o755)
-		_ = os.WriteFile(filepath.Join(pullDir, fmt.Sprintf("token_%04x%s", p.token, ext)), plain, 0o644)
+		_ = os.WriteFile(filepath.Join(pullDir, name), plain, 0o644)
 	}
 }

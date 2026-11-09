@@ -116,7 +116,7 @@ function Chips({ label, value, options, onChange }: { label: string; value: stri
 
 function Filters({ all, f, set }: { all: Workout[]; f: LibraryFilter; set: (k: keyof LibraryFilter, v: string) => void }) {
   const sports = [...new Set(all.map(sportKey))].sort()
-  const origins = (['watch', 'garmin_connect'] as WorkoutOrigin[]).filter((o) => all.some((w) => w.origins.includes(o)))
+  const origins = (['goarmin', 'watch', 'garmin_connect'] as WorkoutOrigin[]).filter((o) => all.some((w) => w.origins.includes(o)))
   const watches = watchShares(all)
   return (
     <section className="grid min-w-0 gap-3" aria-label="Filters">

@@ -97,6 +97,9 @@ the same numbers.
       last sync checked.
     - Search by name or sport, and filter by sport, source and *On ‹watch›* or *On no watch*.
       The filters stay in the address, so a view can be bookmarked.
+    - **Rename** gives a workout another name or description (Garmin Connect's copies start
+      with "Copy of"). goarmin keeps it as its own version and keeps the original too: *Back to
+      the original* undoes it.
     - A workout shows its steps, repeats and targets. A step with an exercise has **View pose**:
       a 3D figure of the movement in a dialog that steps through the workout's exercises
       (Previous and Next, or ← and →).

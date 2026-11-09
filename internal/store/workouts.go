@@ -8,10 +8,13 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/karamble/goarmin/pkg/fitwatch"
 	"github.com/karamble/goarmin/pkg/garmin/product"
 )
 
@@ -121,12 +124,14 @@ type LibraryWatch struct {
 }
 
 // LibraryWorkout is one workout of an account's library: the versions goarmin keeps of it (a
-// watch's file, Garmin Connect's), grouped by name and sport, and where it is now.
+// watch's file, Garmin Connect's, goarmin's own edit), grouped by name and sport (their entry
+// key), and where it is now.
 type LibraryWorkout struct {
-	// WorkoutRow is the version shown: a watch's (what a watch runs), else the newest.
+	// WorkoutRow is the version shown: goarmin's own (an edit), else a watch's (what a watch
+	// runs), else the newest.
 	WorkoutRow
 	Versions []WorkoutRow      // every version, the shown one first
-	Origins  []string          // OriginWatch, OriginGarminConnect: where its versions came from
+	Origins  []string          // OriginGoarmin, OriginWatch, OriginGarminConnect: where its versions came from
 	Watches  []WorkoutPresence // one per Library.Watches, in that order
 }
 
@@ -178,7 +183,27 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 		}
 	}
 
-	// Which workout (by key) each watch keeps, or kept, through the files its items are.
+	// A version's name leads to its entry: a renamed workout's new name and its old one both.
+	alias := map[string]string{}
+	for _, r := range rows {
+		if r.Origin == OriginGoarmin {
+			alias[WorkoutKey(r.Name, r.Sport)] = r.EntryKey
+		}
+	}
+	for _, r := range rows {
+		if k := WorkoutKey(r.Name, r.Sport); alias[k] == "" {
+			alias[k] = r.EntryKey
+		}
+	}
+	entryOf := func(name, sport string) string {
+		k := WorkoutKey(name, sport)
+		if e := alias[k]; e != "" {
+			return e
+		}
+		return k
+	}
+
+	// Which workout (by entry) each watch keeps, or kept, through the files its items are.
 	type seen struct{ on, gone int64 } // the latest listing, the latest removal (Unix; 0: none)
 	where := map[int64]map[string]*seen{}
 	if len(lib.Watches) > 0 {
@@ -199,7 +224,7 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 			if where[dev] == nil {
 				where[dev] = map[string]*seen{}
 			}
-			k := WorkoutKey(name, sport)
+			k := entryOf(name, sport)
 			x := where[dev][k]
 			if x == nil {
 				x = &seen{}
@@ -220,7 +245,7 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 	groups := map[string]*LibraryWorkout{}
 	var order []string
 	for _, r := range rows {
-		k := WorkoutKey(r.Name, r.Sport)
+		k := r.EntryKey
 		g := groups[k]
 		if g == nil {
 			g = &LibraryWorkout{}
@@ -232,13 +257,7 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 	for _, k := range order {
 		g := groups[k]
 		slices.SortStableFunc(g.Versions, func(a, b WorkoutRow) int {
-			if (a.Origin == OriginWatch) != (b.Origin == OriginWatch) {
-				if a.Origin == OriginWatch {
-					return -1
-				}
-				return 1
-			}
-			return cmp.Or(b.RecordedAt.Compare(a.RecordedAt), cmp.Compare(b.ID, a.ID))
+			return cmp.Or(cmp.Compare(originRank(a.Origin), originRank(b.Origin)), b.RecordedAt.Compare(a.RecordedAt), cmp.Compare(b.ID, a.ID))
 		})
 		g.WorkoutRow = g.Versions[0]
 		for _, v := range g.Versions { // a watch's file has no description; Garmin Connect's may
@@ -246,7 +265,7 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 				g.Description = v.Description
 			}
 		}
-		for _, o := range []string{OriginWatch, OriginGarminConnect} {
+		for _, o := range []string{OriginGoarmin, OriginWatch, OriginGarminConnect} {
 			if slices.ContainsFunc(g.Versions, func(v WorkoutRow) bool { return v.Origin == o }) {
 				g.Origins = append(g.Origins, o)
 			}
@@ -270,6 +289,85 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 		lib.Workouts = append(lib.Workouts, *g)
 	}
 	return lib, nil
+}
+
+// originRank orders an entry's versions for showing: goarmin's own edit, then a watch's file,
+// then Garmin Connect's.
+func originRank(origin string) int {
+	switch origin {
+	case OriginGoarmin:
+		return 0
+	case OriginWatch:
+		return 1
+	}
+	return 2
+}
+
+// ErrWorkoutNameTaken is a rename to the name (and sport) of another workout in the library.
+var ErrWorkoutNameTaken = errors.New("store: another workout has that name")
+
+// SaveWorkoutVersion makes or replaces goarmin's own version of user's library entry entryKey:
+// w with description. It returns the version's id; ErrWorkoutNameTaken when another entry has
+// a version of w's name and sport.
+func (s *Store) SaveWorkoutVersion(ctx context.Context, user int64, entryKey string, w fitwatch.Workout, description string) (int64, error) {
+	if entryKey == "" {
+		return 0, errors.New("store: a workout version needs its entry")
+	}
+	steps, err := json.Marshal(w.Steps)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT entry_key, name, sport FROM workouts WHERE user_id = ?`, user)
+		if err != nil {
+			return err
+		}
+		want := WorkoutKey(w.Name, w.Sport)
+		taken := false
+		for rows.Next() {
+			var entry, name, sport string
+			if err := rows.Scan(&entry, &name, &sport); err != nil {
+				rows.Close()
+				return err
+			}
+			if entry == "" {
+				entry = WorkoutKey(name, sport)
+			}
+			if entry != entryKey && WorkoutKey(name, sport) == want {
+				taken = true
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if taken {
+			return ErrWorkoutNameTaken
+		}
+		return tx.QueryRowContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, entry_key, name, sport, sub_sport, steps, estimated_s,
+			description, recorded_at, raw_file_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+			ON CONFLICT (user_id, entry_key) WHERE origin = 'goarmin' DO UPDATE SET name = excluded.name, sport = excluded.sport,
+				sub_sport = excluded.sub_sport, steps = excluded.steps, estimated_s = excluded.estimated_s,
+				description = excluded.description, recorded_at = excluded.recorded_at
+			RETURNING id`,
+			user, OriginGoarmin, entryKey, strings.TrimSpace(w.Name), w.Sport, w.SubSport, string(steps), fitwatch.Estimate(w.Steps),
+			strings.TrimSpace(description), s.now().Unix()).Scan(&id)
+	})
+	return id, err
+}
+
+// DeleteWorkoutVersion removes goarmin's own version id of user's workouts (an edit or a
+// rename: the entry falls back to its originals), or answers ErrNotFound.
+func (s *Store) DeleteWorkoutVersion(ctx context.Context, user, id int64) error {
+	res, err := s.db.W.ExecContext(ctx, `DELETE FROM workouts WHERE user_id = ? AND id = ? AND origin = ?`, user, id, OriginGoarmin)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // LibraryWorkoutByID returns the library workout one of whose versions has this id, or

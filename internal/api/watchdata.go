@@ -6,9 +6,12 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/fitwatch"
@@ -196,6 +199,97 @@ func (s *Server) workout(w http.ResponseWriter, r *http.Request, u store.User) {
 		return
 	}
 	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
+}
+
+// MaxWorkoutDescription is the longest description goarmin keeps for a workout (Garmin
+// Connect's run to about 400 characters).
+const MaxWorkoutDescription = 1000
+
+// workoutPatch renames a workout or changes its description.
+type workoutPatch struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+}
+
+// patchWorkout renames a library workout or changes its description: goarmin keeps its own
+// version of it (its steps as shown, the new name), which the library then shows, and which
+// goarmin sends to a watch in place of the original.
+func (s *Server) patchWorkout(w http.ResponseWriter, r *http.Request, u store.User) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusNotFound, "no such workout")
+		return
+	}
+	var req workoutPatch
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Name == nil && req.Description == nil {
+		writeError(w, http.StatusBadRequest, "give a name or a description")
+		return
+	}
+	x, _, err := s.st.LibraryWorkoutByID(r.Context(), u.ID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such workout")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	wk, desc := x.Workout, x.Description
+	if req.Name != nil {
+		name := strings.Join(strings.Fields(*req.Name), " ")
+		switch n := utf8.RuneCountInString(name); {
+		case n == 0:
+			writeError(w, http.StatusBadRequest, "the workout needs a name")
+			return
+		case n > fitwatch.MaxWorkoutName:
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("a watch shows at most %d characters of a name", fitwatch.MaxWorkoutName))
+			return
+		}
+		wk.Name = name
+	}
+	if req.Description != nil {
+		desc = strings.TrimSpace(*req.Description)
+		if utf8.RuneCountInString(desc) > MaxWorkoutDescription {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("the description is longer than %d characters", MaxWorkoutDescription))
+			return
+		}
+	}
+	vid, err := s.st.SaveWorkoutVersion(r.Context(), u.ID, x.EntryKey, wk, desc)
+	if errors.Is(err, store.ErrWorkoutNameTaken) {
+		writeError(w, http.StatusConflict, "another workout in your library has that name")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	x, watches, err := s.st.LibraryWorkoutByID(r.Context(), u.ID, vid)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
+}
+
+// deleteWorkout removes goarmin's own version of a workout (a rename or edit): the library
+// shows the original again. The originals from a watch or Garmin Connect cannot be removed.
+func (s *Server) deleteWorkout(w http.ResponseWriter, r *http.Request, u store.User) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusNotFound, "no such workout")
+		return
+	}
+	if err := s.st.DeleteWorkoutVersion(r.Context(), u.ID, id); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such workout of goarmin's own; a watch's or Garmin Connect's cannot be removed")
+		return
+	} else if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func courseJSON(c store.CourseRow, points bool) map[string]any {

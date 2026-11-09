@@ -25,8 +25,10 @@ import (
 	"github.com/karamble/goarmin/internal/syncnode"
 	"github.com/karamble/goarmin/pkg/bluez"
 	"github.com/karamble/goarmin/pkg/cobs"
+	"github.com/karamble/goarmin/pkg/garmin/fileaccess"
 	"github.com/karamble/goarmin/pkg/garmin/gfdi"
 	"github.com/karamble/goarmin/pkg/garmin/multilink"
+	"github.com/karamble/goarmin/pkg/garmin/smart"
 )
 
 // Multi-Link GATT service and characteristic pairs (docs/protocol/01 §1.1, 05 §6).
@@ -48,6 +50,10 @@ func runProbe(args []string, stdout, stderr io.Writer) int {
 	tracePath := fs.String("trace", "", "write every packet as JSONL here (default ~/goarmin-captures/linux-probe-<time>.jsonl; '-' disables)")
 	stay := fs.Bool("stay-connected", false, "leave the Bluetooth connection up afterwards")
 	inventory := fs.String("inventory", "", "list every item of these FIT types the watch keeps (comma-separated, e.g. 5 for workouts), synced or not; read-only")
+	send := fs.String("send", "", "push this FIT file to the watch as Garmin Connect does (a workout, -type 5, or a schedule, -type 7); this writes to the watch")
+	sendType := fs.Int("type", 5, "the FIT type of the -send file: 5 workout, 7 schedule")
+	remove := fs.String("remove", "", "delete this workout (its uid from -inventory 5) from the watch; only workouts can be removed this way")
+	removeAs := fs.String("remove-as", "pull", "the direction -remove names: pull (an item the watch offered) or push (one the host pushed)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: goarmin probe -device AA:BB:CC:DD:EE:FF [flags]\n\nConnects to a paired watch, runs the Multi-Link and GFDI handshake and prints what the\nwatch reports. Nothing is synced or archived.")
 		fs.PrintDefaults()
@@ -66,6 +72,13 @@ func runProbe(args []string, stdout, stderr io.Writer) int {
 	defer unlock()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *send != "" || *remove != "" {
+		if err := probeTransfer(ctx, stdout, *adapter, *device, *send, *sendType, *remove, *removeAs == "push", *timeout); err != nil {
+			fmt.Fprintln(stderr, "goarmin probe:", err)
+			return 1
+		}
+		return 0
+	}
 	if *inventory != "" {
 		if err := probeInventory(ctx, stdout, *adapter, *device, *inventory, *timeout); err != nil {
 			fmt.Fprintln(stderr, "goarmin probe:", err)
@@ -589,4 +602,96 @@ func probeInventory(ctx context.Context, out io.Writer, adapter, device, types s
 		fmt.Fprintf(out, "  %s  %-12s %7d bytes  txn %d\n", it.UID, it.TypeName, it.Size, it.TransactionID)
 	}
 	return nil
+}
+
+// probeTransfer pushes a file to the watch (-send) or removes a workout from it (-remove), each
+// over a connection of its own, then lists the watch's workouts.
+func probeTransfer(ctx context.Context, out io.Writer, adapter, device, send string, typ int, remove string, pushed bool, timeout time.Duration) error {
+	addr, err := bluez.NormalizeAddress(device)
+	if err != nil {
+		return err
+	}
+	if typ != 5 && typ != 7 {
+		return errors.New("-type must be 5 (a workout) or 7 (a schedule)")
+	}
+	var data []byte
+	if send != "" {
+		if data, err = os.ReadFile(send); err != nil {
+			return err
+		}
+		if len(data) < 14 || string(data[8:12]) != ".FIT" {
+			return fmt.Errorf("%s is not a FIT file", send)
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout+60*time.Second)
+	defer cancel()
+	opt := syncnode.IdentifyOptions{DataDir: config.DataDir(), Adapter: adapter, Address: addr}
+	typeName := fmt.Sprintf("FIT_TYPE_%d", typ)
+	_, err = syncnode.WithEngine(ctx, opt, func(ctx context.Context, eng *fileaccess.Engine) error {
+		if remove != "" && pushed {
+			// The id the host pushed under: the watch does not list it, so no inventory check.
+			uid, err := parseUID(remove)
+			if err != nil {
+				return err
+			}
+			if err := eng.DeletePushed(ctx, uid); err != nil {
+				return fmt.Errorf("deleting %s (push): %w", remove, err)
+			}
+			fmt.Fprintf(out, "deleted %s (push)\n", remove)
+		} else if remove != "" {
+			items, err := eng.Inventory(ctx, []string{"FIT_TYPE_5"})
+			if err != nil {
+				return err
+			}
+			var target *fileaccess.Item
+			for i := range items {
+				if items[i].UID.String() == remove {
+					target = &items[i]
+				}
+			}
+			if target == nil {
+				return fmt.Errorf("the watch lists no workout %s (goarmin probe -inventory 5 lists them)", remove)
+			}
+			del := func() error { return eng.Delete(ctx, target.UID, func(smart.UUID) bool { return true }) }
+			if pushed {
+				del = func() error { return eng.DeletePushed(ctx, target.UID) }
+			}
+			if err := del(); err != nil {
+				return fmt.Errorf("deleting %s: %w", remove, err)
+			}
+			fmt.Fprintf(out, "deleted workout %s\n", remove)
+		}
+		if data != nil {
+			start := time.Now()
+			p, err := eng.Push(ctx, typeName, data, fileaccess.PushOptions{Announce: typ == 5, AnnounceTimeout: 10 * time.Second})
+			if err != nil {
+				return err
+			}
+			switch {
+			case p.Announced:
+				fmt.Fprintf(out, "pushed %s (%d bytes) under host id %s in %s; the watch keeps it as %s\n", typeName, len(data), p.HostUID,
+					time.Since(start).Round(100*time.Millisecond), p.UID)
+			default:
+				fmt.Fprintf(out, "pushed %s (%d bytes) in %s; the watch announced no new item\n", typeName, len(data), time.Since(start).Round(100*time.Millisecond))
+			}
+		}
+		items, err := eng.Inventory(ctx, []string{"FIT_TYPE_5"})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "the watch keeps %d workouts\n", len(items))
+		return nil
+	})
+	return err
+}
+
+// parseUID reads a uid as goarmin prints them, "<msb 16 hex>-<lsb 16 hex>".
+func parseUID(s string) (smart.UUID, error) {
+	hi, lo, ok := strings.Cut(strings.TrimSpace(s), "-")
+	a, err1 := strconv.ParseUint(hi, 16, 64)
+	b, err2 := strconv.ParseUint(lo, 16, 64)
+	if !ok || err1 != nil || err2 != nil {
+		return smart.UUID{}, fmt.Errorf("%q is not a uid (msb-lsb in hex)", s)
+	}
+	return smart.UUID{MSB: a, LSB: b}, nil
 }

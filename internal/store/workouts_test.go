@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -190,5 +191,96 @@ func TestWorkoutLibrary(t *testing.T) {
 	if err := st.db.R.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_items WHERE device_id = ? AND raw_file_id IS NOT NULL
 		AND raw_file_id NOT IN (SELECT id FROM raw_files)`, dev.ID).Scan(&linked); err != nil || linked != 0 {
 		t.Fatalf("%d items linked to deleted files, %v", linked, err)
+	}
+}
+
+// TestWorkoutRename renames a watch's workout in goarmin: one entry, shown under the new name,
+// also once the watch hands back the renamed file goarmin sent it.
+func TestWorkoutRename(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	now := time.Now().Truncate(time.Second)
+	u, other := person(t, st, "a@example.invalid"), person(t, st, "b@example.invalid")
+	dev, err := st.EnsureDevice(ctx, Device{UnitID: 12, Name: "fenix 8 - 47mm", Address: "AA:BB:CC:DD:EE:12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AssignIfUnowned(ctx, dev.ID, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	const uidCopy, uidPlank, uidBack = "4319872000000011-0100000000000335", "4319872000000012-0100000000000336", "4319872000000013-0100000000000337"
+	cp := watchWorkout(t, st, u.ID, dev.ID, uidCopy, "Copy of Hone & Tone", "training", now.AddDate(0, 0, -3))
+	plank := watchWorkout(t, st, u.ID, dev.ID, uidPlank, "Plank", "training", now.AddDate(0, 0, -2))
+	for uid, id := range map[string]int64{uidCopy: cp.ID, uidPlank: plank.ID} {
+		if err := st.LinkWatchItem(ctx, dev.ID, uid, "FIT_TYPE_5", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Deleted on the watch.
+	if err := st.SetWatchInventory(ctx, dev.ID, WatchInventory{Types: []string{"FIT_TYPE_5"}, At: now.Add(-time.Hour),
+		Items: []InventoryItem{item(uidPlank)}}); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := st.WorkoutLibrary(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig, _ := states(t, lib, "Copy of Hone & Tone")
+	w := orig.Workout
+	w.Name = "Hone & Tone"
+	id, err := st.SaveWorkoutVersion(ctx, u.ID, orig.EntryKey, w, "Toning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib, _ = st.WorkoutLibrary(ctx, u.ID)
+	got, s := states(t, lib, "Hone & Tone")
+	if len(lib.Workouts) != 2 || got.ID != id || got.Origin != OriginGoarmin || got.Description != "Toning" || len(got.Versions) != 2 ||
+		!slices.Equal(got.Origins, []string{OriginGoarmin, OriginWatch}) || !slices.Equal(s, []string{PresenceRemoved}) {
+		t.Fatalf("renamed %+v, states %v (of %d)", got, s, len(lib.Workouts))
+	}
+	// Renamed again: the same version.
+	w.Name = "Hone and Tone"
+	if again, err := st.SaveWorkoutVersion(ctx, u.ID, orig.EntryKey, w, "Toning"); err != nil || again != id {
+		t.Fatalf("renamed again: %d, %v", again, err)
+	}
+	// Another workout's name is taken, case and spacing aside.
+	w.Name = " plank "
+	if _, err := st.SaveWorkoutVersion(ctx, u.ID, orig.EntryKey, w, ""); !errors.Is(err, ErrWorkoutNameTaken) {
+		t.Fatalf("a taken name: %v", err)
+	}
+	w.Name = "Hone & Tone"
+	if _, err := st.SaveWorkoutVersion(ctx, u.ID, orig.EntryKey, w, "Toning"); err != nil {
+		t.Fatal(err)
+	}
+
+	// goarmin sends it; the watch lists it and hands the file back under the new name.
+	back := watchWorkout(t, st, u.ID, dev.ID, uidBack, "Hone & Tone", "training", now)
+	if err := st.LinkWatchItem(ctx, dev.ID, uidBack, "FIT_TYPE_5", back.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetWatchInventory(ctx, dev.ID, WatchInventory{Types: []string{"FIT_TYPE_5"}, At: now,
+		Items: []InventoryItem{item(uidPlank), item(uidBack)}}); err != nil {
+		t.Fatal(err)
+	}
+	lib, _ = st.WorkoutLibrary(ctx, u.ID)
+	got, s = states(t, lib, "Hone & Tone")
+	if len(lib.Workouts) != 2 || got.ID != id || len(got.Versions) != 3 || !slices.Equal(s, []string{PresenceOn}) {
+		t.Fatalf("handed back: %+v, states %v (of %d)", got, s, len(lib.Workouts))
+	}
+
+	// Only goarmin's own version can be removed, and only by its account.
+	if err := st.DeleteWorkoutVersion(ctx, u.ID, cp.ID); err != ErrNotFound {
+		t.Fatalf("removing a watch's version: %v", err)
+	}
+	if err := st.DeleteWorkoutVersion(ctx, other.ID, id); err != ErrNotFound {
+		t.Fatalf("another account: %v", err)
+	}
+	if err := st.DeleteWorkoutVersion(ctx, u.ID, id); err != nil {
+		t.Fatal(err)
+	}
+	lib, _ = st.WorkoutLibrary(ctx, u.ID)
+	got, s = states(t, lib, "Hone & Tone") // the watch's newer file, still one entry
+	if len(lib.Workouts) != 2 || got.Origin != OriginWatch || len(got.Versions) != 2 || !slices.Equal(s, []string{PresenceOn}) {
+		t.Fatalf("the edit removed: %+v, states %v (of %d)", got, s, len(lib.Workouts))
 	}
 }

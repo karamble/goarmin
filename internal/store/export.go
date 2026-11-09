@@ -211,13 +211,18 @@ func (s *Store) WriteExportFile(ctx context.Context, f RawFile, r *gcexport.Resu
 			if at.IsZero() {
 				at = f.ReceivedAt
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s,
-				description, recorded_at, raw_file_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+			entry, err := entryKeyOf(ctx, tx, f.UserID, w.Name, w.Sport)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, entry_key, name, sport, sub_sport, steps, estimated_s,
+				description, recorded_at, raw_file_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (user_id, origin, device_id, name, sport) DO UPDATE SET sub_sport = excluded.sub_sport, steps = excluded.steps,
 					estimated_s = excluded.estimated_s, description = excluded.description, recorded_at = excluded.recorded_at,
-					raw_file_id = excluded.raw_file_id
+					raw_file_id = excluded.raw_file_id,
+					entry_key = CASE WHEN excluded.entry_key <> '' THEN excluded.entry_key ELSE workouts.entry_key END
 				WHERE excluded.recorded_at >= workouts.recorded_at`,
-				f.UserID, OriginGarminConnect, w.Name, w.Sport, w.SubSport, string(steps), w.EstimatedS, w.Description, at.Unix(), f.ID); err != nil {
+				f.UserID, OriginGarminConnect, entry, w.Name, w.Sport, w.SubSport, string(steps), w.EstimatedS, w.Description, at.Unix(), f.ID); err != nil {
 				return err
 			}
 		}

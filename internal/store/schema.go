@@ -884,4 +884,33 @@ CREATE TABLE mcp_calls (
 CREATE INDEX mcp_calls_user_at ON mcp_calls(user_id, at);
 CREATE INDEX mcp_calls_at ON mcp_calls(at);
 `,
+	// 20: goarmin's own workout versions. A workout renamed or edited in goarmin is a version of
+	// origin goarmin without a file (raw_file_id NULL), one per library entry. entry_key names
+	// the entry a version belongs to, so a renamed workout stays one entry, also once the watch
+	// hands back the file goarmin sent it under the new name; empty means the key of its name
+	// and sport (store.WorkoutKey).
+	`
+CREATE TABLE workouts_v20 (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL REFERENCES users(id),
+	origin TEXT NOT NULL DEFAULT 'watch',       -- watch, garmin_connect, goarmin
+	device_id INTEGER NOT NULL,
+	entry_key TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL,
+	sport TEXT NOT NULL,
+	sub_sport TEXT NOT NULL,
+	steps TEXT NOT NULL,                        -- JSON steps
+	estimated_s INTEGER NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	recorded_at INTEGER NOT NULL,
+	raw_file_id INTEGER REFERENCES raw_files(id), -- NULL: goarmin's own version
+	UNIQUE (user_id, origin, device_id, name, sport)
+);
+INSERT INTO workouts_v20 (id, user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s, description, recorded_at, raw_file_id)
+	SELECT id, user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s, description, recorded_at, raw_file_id FROM workouts;
+DROP TABLE workouts;
+ALTER TABLE workouts_v20 RENAME TO workouts;
+CREATE INDEX workouts_file ON workouts(raw_file_id);
+CREATE UNIQUE INDEX workouts_edit ON workouts(user_id, entry_key) WHERE origin = 'goarmin';
+`,
 }
