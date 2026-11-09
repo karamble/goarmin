@@ -228,7 +228,10 @@ describe('Coach', () => {
 
 describe('watch data', () => {
   const workout = {
-    id: 4, name: '6 × 400 m', sport: 'running', sub_sport: 'generic', estimated_s: 1830, step_count: 5, recorded_at: now - 86400,
+    id: 4, name: '6 × 400 m', sport: 'running', sub_sport: 'generic', estimated_s: 1830, step_count: 5, exercise_count: 1, recorded_at: now - 86400,
+    origin: 'watch', origins: ['watch', 'garmin_connect'], description: 'Short and fast',
+    watches: [{ device_id: 7, name: 'Fenix 8', state: 'on', since: now - 600, checked_at: now - 600 }],
+    versions: [{ id: 4, origin: 'watch', device_id: 7, recorded_at: now - 86400, step_count: 5 }, { id: 9, origin: 'garmin_connect', device_id: 0, recorded_at: now - 2 * 86400, step_count: 5 }],
     steps: [
       { index: 0, intensity: 'warmup', duration: 'time', duration_value: 600, target: 'heart_rate', target_zone: 2 },
       { index: 1, intensity: 'active', duration: 'distance', duration_value: 400, target: 'speed', target_low: 4, target_high: 4.3 },
@@ -252,6 +255,9 @@ describe('watch data', () => {
     unmount()
     page(<Workout />, '/training/workouts/4', '/training/workouts/:id')
     expect(await screen.findByText('6 times')).toBeTruthy()
+    expect(screen.getByText('On Fenix 8')).toBeTruthy()
+    expect(screen.getByText('From a watch and Garmin Connect')).toBeTruthy()
+    expect(screen.getByText('Short and fast')).toBeTruthy()
     expect(screen.getByText('Warm up')).toBeTruthy()
     expect(screen.getByText('HR zone 2')).toBeTruthy()
     expect(screen.getByText('3:53–4:10 /km')).toBeTruthy()
@@ -265,6 +271,46 @@ describe('watch data', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('img', { name: /^Intensity over the workout: warmup, active, recovery, active/ })).toBeTruthy()
+  })
+
+  it('is a library: every workout with where it is, searchable and filtered', async () => {
+    const lib = [
+      { ...workout, steps: undefined, versions: undefined },
+      { ...workout, steps: undefined, versions: undefined, id: 5, name: 'Coherence', sport: 'training', sub_sport: 'breathing', origins: ['watch'],
+        description: undefined, watches: [{ device_id: 7, name: 'Fenix 8', state: 'removed', since: now - 3600, checked_at: now - 600 }] },
+      { ...workout, steps: undefined, versions: undefined, id: 6, name: 'Alignment 101', sport: 'training', sub_sport: 'yoga', origin: 'garmin_connect',
+        origins: ['garmin_connect'], description: undefined, watches: [{ device_id: 7, name: 'Fenix 8', state: 'absent', checked_at: now - 600 }] },
+    ]
+    stubApi({ '/api/workouts': json(lib) })
+    show(<Workouts />, '/training/workouts')
+    const cards = await screen.findByRole('list', { name: 'Workouts' })
+    expect(within(cards).getAllByRole('link')).toHaveLength(3)
+    expect(screen.getByText('3 workouts in your library')).toBeTruthy()
+    expect(screen.getByText(/1 on it · 1 removed · checked 10 min ago/)).toBeTruthy()
+    expect(within(cards).getByText('On Fenix 8')).toBeTruthy() // the badge's spoken text
+    expect(within(cards).getByText(/^Removed from Fenix 8/)).toBeTruthy()
+    expect(within(cards).getByText('Not on Fenix 8')).toBeTruthy()
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'On a watch' })).getByRole('button', { name: 'On Fenix 8' }))
+    expect(within(screen.getByRole('list', { name: 'Workouts' })).getAllByRole('link').map((a) => a.textContent)).toEqual([expect.stringContaining('6 × 400 m')])
+    expect(screen.getByText('1 of 3 workouts')).toBeTruthy()
+    fireEvent.click(within(screen.getByRole('group', { name: 'On a watch' })).getByRole('button', { name: 'On no watch' }))
+    expect(within(screen.getByRole('list', { name: 'Workouts' })).getAllByRole('link')).toHaveLength(2)
+    fireEvent.click(within(screen.getByRole('group', { name: 'Source' })).getByRole('button', { name: 'From Garmin Connect' }))
+    expect(within(screen.getByRole('list', { name: 'Workouts' })).getAllByRole('link').map((a) => a.textContent)).toEqual([expect.stringContaining('Alignment 101')])
+    fireEvent.click(within(screen.getByRole('group', { name: 'Source' })).getByRole('button', { name: 'Every source' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'On a watch' })).getByRole('button', { name: 'Anywhere' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search workouts' }), { target: { value: 'breathing' } })
+    expect(within(screen.getByRole('list', { name: 'Workouts' })).getAllByRole('link').map((a) => a.textContent)).toEqual([expect.stringContaining('Coherence')])
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search workouts' }), { target: { value: 'nothing like it' } })
+    expect(screen.getByText('No workout fits these filters.')).toBeTruthy()
+  })
+
+  it('says how workouts reach an empty library', async () => {
+    stubApi({ '/api/workouts': json([]) })
+    show(<Workouts />, '/training/workouts')
+    expect(await screen.findByText('No workouts yet')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Devices › Import' }).getAttribute('href')).toBe('/devices/import')
   })
 
   it('lists courses and shows one with its points', async () => {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/karamble/goarmin/pkg/bluez"
+	"github.com/karamble/goarmin/pkg/garmin/fileaccess"
 	"github.com/karamble/goarmin/pkg/garmin/gattlink"
 	"github.com/karamble/goarmin/pkg/garmin/gfdi"
 	"github.com/karamble/goarmin/pkg/garmin/watch"
@@ -305,6 +306,48 @@ func identifyWith(ctx context.Context, opt IdentifyOptions, open watch.Opener, p
 	cancel()
 	step(opt, StepBattery)
 	return id, nil
+}
+
+// TakeStock connects to the watch, runs the handshake and lists every item of the given GDXML
+// types it keeps ("FIT_TYPE_5": its workouts), synced or not, then disconnects. It is read-only:
+// nothing is fetched, flagged or saved.
+func TakeStock(ctx context.Context, opt IdentifyOptions, types []string) (Identity, []fileaccess.Item, error) {
+	id := Identity{Address: opt.Address, Battery: noBattery}
+	bz, err := bluez.Open()
+	if err != nil {
+		return id, nil, err
+	}
+	defer bz.Close()
+	gw, err := gattlink.Connect(ctx, bz, opt.Adapter, opt.Address)
+	if err != nil {
+		return id, nil, err
+	}
+	defer func() {
+		dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = gw.Disconnect(dctx)
+	}()
+	return takeStockWith(ctx, opt, types, gw.Open, gw.Pairs)
+}
+
+// takeStockWith is TakeStock after the Bluetooth connection.
+func takeStockWith(ctx context.Context, opt IdentifyOptions, types []string, open watch.Opener, pairs []int) (Identity, []fileaccess.Item, error) {
+	id := Identity{Address: opt.Address, Battery: noBattery}
+	if opt.Logger == nil {
+		opt.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	d, err := dial(ctx, opt.DataDir, opt.Address, open, pairs, watch.Options{Location: opt.Location, Logger: opt.Logger})
+	if err != nil {
+		return id, nil, err
+	}
+	defer d.closer.Close()
+	defer d.conn.Close()
+	id.Device = d.conn.Device
+	id.Record = recordOf(d.conn.Device, d.pair, d.client)
+	eng := fileaccess.New(d.conn, fileaccess.NewMemStore(), fileaccess.Options{Logger: opt.Logger})
+	defer eng.Close()
+	items, err := eng.Inventory(ctx, types)
+	return id, items, err
 }
 
 // BluezPairer pairs and identifies watches with this computer's BlueZ: the server's wizard

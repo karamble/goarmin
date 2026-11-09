@@ -534,13 +534,18 @@ func workoutOf(w *mesgdef.Workout, steps []*mesgdef.WorkoutStep, titles map[[2]u
 			st.DurationValue, st.TargetPct = offsetPower(dv)
 		case typedef.WktStepDurationRepeatUntilStepsCmplt:
 			st.Duration, st.From, st.Repeat = "repeat", int(dv), int(s.TargetValue)
+		case typedef.WktStepDurationRepeatUntilTime:
+			st.Duration, st.From = "repeat_until_time", int(dv)
+			if s.TargetValue != basetype.Uint32Invalid {
+				st.DurationValue = float64(s.TargetValue) / 1000
+			}
 		default:
 			st.Duration = word(s.DurationType.String())
 			if dv != basetype.Uint32Invalid {
 				st.DurationValue = float64(dv)
 			}
 		}
-		if st.Duration != "repeat" {
+		if !IsRepeat(st) {
 			target(&st, s)
 		}
 		if s.ExerciseCategory != typedef.ExerciseCategoryInvalid && s.ExerciseName != basetype.Uint16Invalid {
@@ -559,9 +564,14 @@ func workoutOf(w *mesgdef.Workout, steps []*mesgdef.WorkoutStep, titles map[[2]u
 		}
 		out.Steps = append(out.Steps, st)
 	}
-	out.EstimatedS = estimate(out.Steps)
+	out.EstimatedS = Estimate(out.Steps)
 	return out
 }
+
+// IsRepeat reports whether a step repeats the steps from its From up to itself: Repeat times in
+// all ("repeat"), or until DurationValue seconds have passed since the first of them began
+// ("repeat_until_time", an AMRAP).
+func IsRepeat(s Step) bool { return s.Duration == "repeat" || s.Duration == "repeat_until_time" }
 
 // offsetHR reads a heart-rate value of a workout step: up to 100 a % of max, above it bpm + 100.
 func offsetHR(v uint32) (float64, bool) {
@@ -617,9 +627,9 @@ func target(st *Step, s *mesgdef.WorkoutStep) {
 	}
 }
 
-// estimate adds up the timed steps, repeats included (a repeat step runs the steps from From up
-// to itself Repeat times in all).
-func estimate(steps []Step) int {
+// Estimate adds up the timed steps, repeats included (a repeat step runs the steps from From up
+// to itself Repeat times in all, or for its DurationValue seconds), in seconds.
+func Estimate(steps []Step) int {
 	total := 0.0
 	pos := map[int]int{} // step index → position in steps
 	for i, s := range steps {
@@ -641,6 +651,10 @@ func estimate(steps []Step) int {
 		case s.Duration == "repeat" && s.Repeat > 1:
 			if from, ok := pos[s.From]; ok && from < i {
 				total += sum(from, i) * float64(s.Repeat-1)
+			}
+		case s.Duration == "repeat_until_time":
+			if from, ok := pos[s.From]; ok && from < i {
+				total += max(0, s.DurationValue-sum(from, i)) // the first round is counted already
 			}
 		}
 	}

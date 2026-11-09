@@ -6,14 +6,21 @@ import type { WorkoutStep } from '../api/types'
 import { clock, distance, type Units } from './format'
 
 /** A workout as the page lays it out: steps, and repeat blocks holding their steps. */
-export type Block = { kind: 'step'; step: WorkoutStep } | { kind: 'repeat'; times: number; steps: WorkoutStep[] }
+export type Block =
+  | { kind: 'step'; step: WorkoutStep }
+  | { kind: 'repeat'; times: number; steps: WorkoutStep[]; forS?: number }
+
+/** isRepeat tells a step that repeats the steps before it: a number of times, or for a time
+ * (as many rounds as fit, an AMRAP). */
+export const isRepeat = (s: WorkoutStep) => s.duration === 'repeat' || s.duration === 'repeat_until_time'
 
 /** blocks folds repeat steps into blocks: a repeat step runs the steps from its From up to
- * itself Repeat times in all, so those steps move into the block. */
+ * itself Repeat times in all (or for its duration_value seconds), so those steps move into the
+ * block. */
 export function blocks(steps: WorkoutStep[]): Block[] {
   const out: Block[] = []
   for (const s of steps) {
-    if (s.duration !== 'repeat') {
+    if (!isRepeat(s)) {
       out.push({ kind: 'step', step: s })
       continue
     }
@@ -25,9 +32,20 @@ export function blocks(steps: WorkoutStep[]): Block[] {
       inner.unshift(last.step)
       out.pop()
     }
-    out.push({ kind: 'repeat', times: Math.max(1, s.repeat ?? 1), steps: inner })
+    if (s.duration === 'repeat_until_time') {
+      const round = inner.reduce((a, x) => a + (x.duration === 'time' ? (x.duration_value ?? 0) : 0), 0)
+      const forS = s.duration_value ?? 0
+      out.push({ kind: 'repeat', times: round > 0 ? Math.max(1, Math.round(forS / round)) : 1, steps: inner, forS })
+    } else {
+      out.push({ kind: 'repeat', times: Math.max(1, s.repeat ?? 1), steps: inner })
+    }
   }
   return out
+}
+
+/** repeatText names a repeat block: "6 times", or "As many rounds as fit in 10:00". */
+export function repeatText(b: Extract<Block, { kind: 'repeat' }>): string {
+  return b.forS ? `As many rounds as fit in ${clock(b.forS)}` : `${b.times} times`
 }
 
 const words = (s: string) => s.replace(/_/g, ' ')

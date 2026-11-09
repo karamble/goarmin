@@ -11,13 +11,18 @@ import { Body } from '../CardFrame'
 import type { CardProps } from '../types'
 import { sportIcon } from './sport'
 
-/** WorkoutToday is Garmin Coach's workout for the day, or else the workouts saved on the watch. */
+/** WorkoutToday is Garmin Coach's workout for the day, or else the workouts on the watch (the
+ * library's, while no watch has been checked). */
 export default function WorkoutToday({ day, size, isToday }: CardProps) {
   const coach = useCoachWeek(day)
   const saved = useWorkouts()
   const todays = distinctWorkouts((coach.data ?? []).filter((x) => x.day === day && !x.rest_day))
   const rest = (coach.data ?? []).some((x) => x.day === day && x.rest_day)
-  const list = saved.data ?? []
+  // What is on a watch, if goarmin knows; else the whole library (no watch checked yet).
+  const library = saved.data ?? []
+  const onWatch = library.filter((w) => w.watches.some((x) => x.state === 'on'))
+  const known = library.some((w) => w.watches.some((x) => x.state !== 'unknown'))
+  const list = known ? onWatch : library
   return (
     <Body q={[coach, saved]} empty={!todays.length && !rest && !list.length} isToday={isToday} size={size}
       emptyText="No Garmin Coach plan and no saved workouts on the watch">
@@ -42,7 +47,7 @@ export default function WorkoutToday({ day, size, isToday }: CardProps) {
             <p className="m-0 font-display text-[22px] uppercase">Rest day</p>
           ) : (
             <>
-              <p className="caps m-0 !text-[10px] !text-faint">Saved on the watch</p>
+              <p className="caps m-0 !text-[10px] !text-faint">{known ? 'On your watch' : 'In your library'}</p>
               <ul className="m-0 grid list-none gap-1.5 p-0">
                 {list.slice(0, size === 'M' ? 3 : 6).map((w) => {
                   const Icon = sportIcon(w.sport)

@@ -175,12 +175,14 @@ func deleteFileData(ctx context.Context, tx *sql.Tx, file int64) error {
 		"health_status", "hydration_logs", "health_snapshots", "account_documents",
 		"weigh_ins", "skin_temp_nightly", "ecg_recordings", "physiology", "gear", "golf_clubs", "personal_records", "settings_changes",
 		"device_series", "device_documents",
-		"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "courses"} {
+		"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "workout_files", "courses"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE raw_file_id = ?`, file); err != nil {
 			return err
 		}
 	}
-	return nil
+	// A watch's item stays known (it may still be on the watch); only its file is gone.
+	_, err := tx.ExecContext(ctx, `UPDATE watch_items SET raw_file_id = NULL WHERE raw_file_id = ?`, file)
+	return err
 }
 
 func nullUnknown(v int) any {

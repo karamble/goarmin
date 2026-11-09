@@ -8,7 +8,35 @@
 
 package fitwatch
 
-import "github.com/muktihari/fit/profile/typedef"
+import (
+	"strings"
+	"sync"
+
+	"github.com/muktihari/fit/profile/typedef"
+)
+
+var (
+	exerciseOnce    sync.Once
+	exerciseNumbers map[[2]string]int
+)
+
+// ExerciseNumber is the FIT profile's number for an exercise by its category's and its own
+// profile name ("plank", "side_plank" → 66). Case does not matter, so Garmin Connect's
+// "PLANK"/"SIDE_PLANK" find it too.
+func ExerciseNumber(category, name string) (int, bool) {
+	exerciseOnce.Do(func() {
+		exerciseNumbers = map[[2]string]int{}
+		for _, c := range typedef.ListExerciseCategory() {
+			for n := range 1 << 10 { // the profile's names are numbered from 0, well below this
+				if e := exerciseEnum(c, uint16(n)); e != "" && !strings.Contains(e, "Invalid") {
+					exerciseNumbers[[2]string{c.String(), e}] = n
+				}
+			}
+		}
+	})
+	n, ok := exerciseNumbers[[2]string{strings.ToLower(category), strings.ToLower(name)}]
+	return n, ok
+}
 
 // exerciseEnum is the FIT profile's name for exercise number name in category ("cat_cow"), or
 // the enum's invalid form for numbers it does not know.

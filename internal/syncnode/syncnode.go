@@ -77,6 +77,20 @@ type Options struct {
 	// watch; a later sync gives it again before it flags it. Without Hand, a file is flagged as
 	// soon as the spool has it on disk, and the caller imports the spool afterwards.
 	Hand func(ctx context.Context, f fileaccess.StoredFile) error
+	// Inventory, if set, takes stock of these GDXML types at the end of a sync: every item of
+	// them the watch keeps, synced or not (Result.Inventory). It is read-only.
+	Inventory []string
+}
+
+// InventoryTypes are what a sync takes stock of: the watch's workouts (FIT type 5), so the
+// workout library knows which are on it.
+var InventoryTypes = []string{"FIT_TYPE_5"}
+
+// Inventory is what a watch kept of some types at the end of a sync.
+type Inventory struct {
+	Types []string
+	Items []fileaccess.Item
+	At    time.Time
 }
 
 // Result describes a finished sync.
@@ -102,6 +116,9 @@ type Result struct {
 	Features *smart.WatchFeatures
 	// WellnessMet counts the watch's WellnessThresholdMetNotifications during the session.
 	WellnessMet int
+	// Inventory is what the watch kept of Options.Inventory's types after the sync (nil: not
+	// asked, or the listing failed).
+	Inventory *Inventory
 }
 
 // DeleteOutcome is the result of one requested delete.
@@ -317,6 +334,16 @@ func syncWith(ctx context.Context, opt Options, addr string, open watch.Opener, 
 	res.SyncTime = time.Since(syncStart)
 	if err == nil {
 		res.Deleted = deleteStored(ctx, eng, store, opt.Delete, opt.IsStored)
+		if len(opt.Inventory) > 0 {
+			ictx, icancel := context.WithTimeout(ctx, 30*time.Second)
+			items, ierr := eng.Inventory(ictx, opt.Inventory)
+			icancel()
+			if ierr != nil {
+				opt.Logger.Warn("taking stock of the watch's files", "types", opt.Inventory, "err", ierr)
+			} else {
+				res.Inventory = &Inventory{Types: opt.Inventory, Items: items, At: time.Now()}
+			}
+		}
 	}
 	res.Battery = conn.Battery()
 	res.WellnessMet = conn.WellnessThresholdMet()

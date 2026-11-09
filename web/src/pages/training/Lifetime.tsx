@@ -6,7 +6,7 @@ import { useTotals } from '../../api/hooks/training'
 import { sportIcon } from '../../glance/cards/sport'
 import { distance, hm, type Units } from '../../lib/format'
 import { Card } from '../health/parts'
-import { sportWords } from './Workouts'
+import { sportWords } from '../../lib/workoutLibrary'
 
 /** Lifetime shows the watches' own lifetime totals per sport (nothing before a watch sent them). */
 export function Lifetime({ units, title = 'Since you started, as the watch counts' }: { units: Units; title?: string }) {

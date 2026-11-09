@@ -114,6 +114,7 @@ sequenceDiagram
     Node->>Raw: store by sha256, ingest
     Node->>Watch: flag as synced (only after the file is stored)
   end
+  Node->>Watch: list every workout it keeps (read-only)
   Node->>Watch: sync complete, disconnect
   Node-->>Hub: result (counts, battery, errors)
   Hub->>Raw: record the sync run, rebuild the touched days
@@ -122,6 +123,9 @@ sequenceDiagram
 - **Only after a durable store.** A file is flagged as synced only once it is in the raw
   store. A flag lets the watch delete health files, so a crash between pull and store loses
   nothing: the next sync pulls the file again.
+- **Taking stock.** After its files, a sync lists every workout the watch keeps (a listing
+  filtered by type, synced or not) and the server records it per watch, so the workout library
+  knows what is on each watch. A file a sync stores is linked to its item.
 - **After fetching** is a per-watch setting:
   - `keep` never flags, so another app can still sync the files;
   - `archive` flags like Garmin Connect;

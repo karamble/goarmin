@@ -37,7 +37,7 @@ func writeDaily(ctx context.Context, tx execer, user, file int64, rank int, k we
 
 // exportTables are what an export file writes, deleted by file before it is written again.
 var exportTables = []string{"daily_values", "sleep_parts", "naps", "weigh_ins", "ecg_recordings", "health_status", "hydration_logs",
-	"health_snapshots", "gear", "personal_records", "account_documents"}
+	"health_snapshots", "gear", "personal_records", "account_documents", "workouts"}
 
 // WriteExportFile replaces what an export file (f, a kept JSON or other file) contributed with
 // what gcexport read from it, and records the ingest under handler and version. It returns the
@@ -199,6 +199,25 @@ func (s *Store) WriteExportFile(ctx context.Context, f RawFile, r *gcexport.Resu
 					activity_id = excluded.activity_id, data = excluded.data, raw_file_id = excluded.raw_file_id
 				WHERE excluded.ts >= personal_records.ts`,
 				f.UserID, FromJSON, p.Type, p.At.Unix(), nanNull(p.Value), nullIf0(p.Activity), string(data), f.ID); err != nil {
+				return err
+			}
+		}
+		for _, w := range r.Workouts {
+			steps, err := json.Marshal(w.Steps)
+			if err != nil {
+				return err
+			}
+			at := w.Updated
+			if at.IsZero() {
+				at = f.ReceivedAt
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s,
+				description, recorded_at, raw_file_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (user_id, origin, device_id, name, sport) DO UPDATE SET sub_sport = excluded.sub_sport, steps = excluded.steps,
+					estimated_s = excluded.estimated_s, description = excluded.description, recorded_at = excluded.recorded_at,
+					raw_file_id = excluded.raw_file_id
+				WHERE excluded.recorded_at >= workouts.recorded_at`,
+				f.UserID, OriginGarminConnect, w.Name, w.Sport, w.SubSport, string(steps), w.EstimatedS, w.Description, at.Unix(), f.ID); err != nil {
 				return err
 			}
 		}

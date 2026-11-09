@@ -114,33 +114,79 @@ func (s *Server) totals(w http.ResponseWriter, r *http.Request, u store.User) {
 
 func workoutJSON(x store.WorkoutRow, steps bool) map[string]any {
 	out := map[string]any{"id": x.ID, "name": x.Name, "sport": x.Sport, "sub_sport": x.SubSport, "estimated_s": x.EstimatedS,
-		"step_count": len(x.Steps), "recorded_at": x.RecordedAt.Unix()}
+		"step_count": len(x.Steps), "recorded_at": x.RecordedAt.Unix(), "origin": x.Origin}
+	exercises := map[[2]any]bool{}
+	for _, st := range x.Steps {
+		if st.Exercise != nil {
+			exercises[[2]any{st.Exercise.Category, st.Exercise.Number}] = true
+		}
+	}
+	out["exercise_count"] = len(exercises)
+	if x.Description != "" {
+		out["description"] = x.Description
+	}
 	if steps {
 		out["steps"] = x.Steps
 	}
 	return out
 }
 
+// libraryJSON is a library workout: the version shown, where its versions came from, and on
+// which of the account's watches it is (watches in the library's order).
+func libraryJSON(x store.LibraryWorkout, watches []store.LibraryWatch, steps bool) map[string]any {
+	out := workoutJSON(x.WorkoutRow, steps)
+	out["origins"] = x.Origins
+	ws := []map[string]any{}
+	for i, p := range x.Watches {
+		d := watches[i]
+		name := d.Nickname
+		if name == "" {
+			name = d.Name
+		}
+		m := map[string]any{"device_id": p.DeviceID, "name": name, "state": p.State}
+		if !p.At.IsZero() {
+			m["since"] = p.At.Unix()
+		}
+		if !d.InventoryAt.IsZero() {
+			m["checked_at"] = d.InventoryAt.Unix()
+		}
+		ws = append(ws, m)
+	}
+	out["watches"] = ws
+	if steps {
+		vs := []map[string]any{}
+		for _, v := range x.Versions {
+			vs = append(vs, map[string]any{"id": v.ID, "origin": v.Origin, "device_id": v.DeviceID, "recorded_at": v.RecordedAt.Unix(),
+				"step_count": len(v.Steps)})
+		}
+		out["versions"] = vs
+	}
+	return out
+}
+
+// workouts lists the account's workout library: every workout once, with where it came from
+// and on which watches it is.
 func (s *Server) workouts(w http.ResponseWriter, r *http.Request, u store.User) {
-	list, err := s.st.Workouts(r.Context(), u.ID, 0)
+	lib, err := s.st.WorkoutLibrary(r.Context(), u.ID)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
 	out := []map[string]any{}
-	for _, x := range list {
-		out = append(out, workoutJSON(x, false))
+	for _, x := range lib.Workouts {
+		out = append(out, libraryJSON(x, lib.Watches, false))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
+// workout is one library workout with its steps, by the id of any of its versions.
 func (s *Server) workout(w http.ResponseWriter, r *http.Request, u store.User) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeError(w, http.StatusNotFound, "no such workout")
 		return
 	}
-	list, err := s.st.Workouts(r.Context(), u.ID, id)
+	x, watches, err := s.st.LibraryWorkoutByID(r.Context(), u.ID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no such workout")
 		return
@@ -149,7 +195,7 @@ func (s *Server) workout(w http.ResponseWriter, r *http.Request, u store.User) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, workoutJSON(list[0], true))
+	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
 }
 
 func courseJSON(c store.CourseRow, points bool) map[string]any {

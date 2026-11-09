@@ -682,6 +682,10 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 		IncludeSynced: req.IncludeSynced, Delete: req.Delete,
 		IsStored: func(uid string) bool { return h.be.Stored(ctx, w, uid) },
 		Location: w.Zone, Logger: h.log, OnEvent: h.progress(addr), Features: h.opt.Features}
+	inv, stock := h.be.(Inventorier)
+	if stock {
+		sopt.Inventory = syncnode.InventoryTypes
+	}
 	handed := 0
 	if hd, ok := h.be.(Hander); ok {
 		sopt.Hand = func(ctx context.Context, f fileaccess.StoredFile) error {
@@ -720,6 +724,12 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 		if _, node := h.be.(Hander); !node {
 			err = ierr
 			run.ErrorCode = CodeImport
+		}
+	}
+	// What the watch keeps now, after the files are stored (so they link to its items).
+	if stock && res.Inventory != nil {
+		if ierr := inv.Inventory(ctx, w, *res.Inventory); ierr != nil {
+			h.log.Warn("nodehub: recording what the watch keeps", "watch", addr, "err", ierr)
 		}
 	}
 	return finish(err)

@@ -30,6 +30,18 @@ func ListAllRequest(cursor *uint32) smart.FileAccess {
 	return smart.FileAccess{ItemListRequest: req}
 }
 
+// InventoryRequest lists every item of the given GDXML types ("FIT_TYPE_5"), synced or not,
+// from the start: what the watch keeps of those types now. Garmin Connect filters a listing
+// by data type the same way (by format, for its GDXML device file); a watch that ignores the
+// filter lists everything, which Engine.Inventory filters itself.
+func InventoryRequest(types []string) smart.FileAccess {
+	req := &smart.ItemListRequest{GetFlags: []smart.UUID{smart.SyncedFlag}}
+	for _, t := range types {
+		req.IncludedDataTypes = append(req.IncludedDataTypes, smart.DataType{Format: smart.Ptr(smart.FormatGDXMLDataType), GDXMLString: smart.S(t)})
+	}
+	return smart.FileAccess{ItemListRequest: req}
+}
+
 // ContinueListRequest asks for the next page of a listing.
 func ContinueListRequest(session uint32) smart.FileAccess {
 	return smart.FileAccess{ItemListRequest: &smart.ItemListRequest{SessionID: smart.U32(session)}}

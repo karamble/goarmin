@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -157,6 +158,54 @@ func TestSyncDeleteRequested(t *testing.T) {
 		if f.UID == act.UID && f.Outcome != fileaccess.Deleted {
 			t.Fatalf("spool record %+v", f)
 		}
+	}
+}
+
+// TestSyncInventory takes stock of the watch's workouts at the end of each sync: all of them,
+// pulled before or not, and one deleted on the watch is missing from the next.
+func TestSyncInventory(t *testing.T) {
+	now := time.Now()
+	serial := uint32(3_500_000_001)
+	w := fakewatch.New(fakewatch.Options{})
+	a := w.AddFile("FIT_TYPE_5", fittest.File(typedef.FileWorkout, serial, now.Add(-48*time.Hour), 3))
+	b := w.AddFile("FIT_TYPE_5", fittest.File(typedef.FileWorkout, serial, now.Add(-24*time.Hour), 4))
+	w.AddFile("FIT_TYPE_4", fittest.File(typedef.FileActivity, serial, now.Add(-time.Hour), 20))
+	open := func(_ context.Context, _ int) (multilink.Link, io.Closer, error) {
+		x, y := memlink.Pipe(memlink.Options{})
+		go func() { _ = w.Serve(context.Background(), y) }()
+		return x, x, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	stock := func() []string {
+		t.Helper()
+		res, err := SyncWith(ctx, Options{DataDir: dir, NoArchive: true, Inventory: InventoryTypes}, addr, open, []int{0})
+		if err != nil {
+			t.Fatalf("sync: %v", err)
+		}
+		if res.Inventory == nil || !slices.Equal(res.Inventory.Types, InventoryTypes) || res.Inventory.At.IsZero() {
+			t.Fatalf("inventory %+v", res.Inventory)
+		}
+		var got []string
+		for _, it := range res.Inventory.Items {
+			got = append(got, it.UID.String())
+		}
+		slices.Sort(got)
+		return got
+	}
+	want := []string{a.UID.String(), b.UID.String()}
+	slices.Sort(want)
+	if got := stock(); !slices.Equal(got, want) {
+		t.Fatalf("first inventory %v, want %v", got, want)
+	}
+	w.RemoveFile(a.UID)
+	if got := stock(); !slices.Equal(got, []string{b.UID.String()}) {
+		t.Fatalf("after a removal %v", got)
+	}
+	res, err := SyncWith(ctx, Options{DataDir: dir, NoArchive: true}, addr, open, []int{0})
+	if err != nil || res.Inventory != nil {
+		t.Fatalf("without Inventory: %+v, %v", res.Inventory, err)
 	}
 }
 

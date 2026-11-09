@@ -45,6 +45,7 @@ func (s *Server) routesNode(mux *http.ServeMux) {
 	mux.HandleFunc("PUT "+p+"/files/{sha256}", s.needNode(s.nodeUpload))
 	mux.HandleFunc("POST "+p+"/stored", s.needNode(s.nodeStored))
 	mux.HandleFunc("POST "+p+"/runs", s.needNode(s.nodeRun))
+	mux.HandleFunc("POST "+p+"/inventory", s.needNode(s.nodeInventory))
 	mux.HandleFunc("GET "+p+"/history", s.needNode(s.nodeHistory))
 	mux.HandleFunc("POST "+p+"/progress", s.needNode(s.nodeProgress))
 	mux.HandleFunc("GET "+p+"/commands", s.needNode(s.nodeCommands))
@@ -386,6 +387,31 @@ func (s *Server) nodeRun(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
 		_ = s.st.SetDeleteSupport(ctx, dev.ID, req.DeleteSupport)
 	}
 	if err := s.st.RecordSyncRun(ctx, run); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// nodeInventory records what a watch kept of some types at the end of a sync (its workouts).
+func (s *Server) nodeInventory(w http.ResponseWriter, r *http.Request, nc nodeCtx) {
+	var req nodeproto.InventoryRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if len(req.Types) == 0 || req.At.IsZero() || len(req.Items) > 10000 {
+		writeError(w, http.StatusBadRequest, "an inventory needs its types, its time and at most 10,000 items")
+		return
+	}
+	dev, ok := s.nodeDevice(w, r, nc, req.Unit)
+	if !ok {
+		return
+	}
+	inv := store.WatchInventory{Types: req.Types, At: req.At}
+	for _, it := range req.Items {
+		inv.Items = append(inv.Items, store.InventoryItem{UID: it.UID, Type: it.Type, Size: it.Size})
+	}
+	if err := s.st.SetWatchInventory(r.Context(), dev.ID, inv); err != nil {
 		s.internalError(w, r, err)
 		return
 	}

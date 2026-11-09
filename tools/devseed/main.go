@@ -29,6 +29,7 @@ import (
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/fitactivity"
 	"github.com/karamble/goarmin/pkg/fitwatch"
+	"github.com/karamble/goarmin/pkg/garmin/gcexport"
 	"github.com/karamble/goarmin/pkg/garmin/wellness"
 	"github.com/karamble/goarmin/pkg/geo"
 	"github.com/muktihari/fit/profile/typedef"
@@ -166,41 +167,70 @@ func seedWatch(ctx context.Context, st *store.Store, user int64, now time.Time) 
 	course.Points = []fitwatch.CoursePoint{{Type: "water", Name: "Fountain", DistanceM: loop.Track.Distance[mid], Lat: loop.Track.Lat[mid], Lon: loop.Track.Lon[mid]},
 		{Type: "summit", Name: "Hill top", DistanceM: loop.Track.Distance[mid/2], Lat: loop.Track.Lat[mid/2], Lon: loop.Track.Lon[mid/2]}}
 	files["course"] = &fitwatch.File{Course: course}
+	files["workout-mobility"] = &fitwatch.File{Workout: &fitwatch.Workout{Name: "Morning Mobility", Sport: "mobility", SubSport: "generic", Steps: []fitwatch.Step{
+		{Index: 0, Intensity: "active", Duration: "time", DurationValue: 45, Exercise: &fitwatch.Exercise{Category: "pose", Name: "Cat Cow", Number: 51}},
+		{Index: 1, Intensity: "active", Duration: "time", DurationValue: 60, Exercise: &fitwatch.Exercise{Category: "pose", Name: "Child's Pose", Number: 11}},
+	}}}
+	// The made-up watch the workouts are on, as a sync leaves them: each workout file stored
+	// under its item's uid and linked to it.
+	dev, err := st.EnsureDevice(ctx, store.Device{UnitID: 3_999_000_001, Product: 4536, Name: "fenix 8 - 47mm", Address: "C0:FF:EE:00:00:01"})
+	if err != nil {
+		return err
+	}
+	if err := st.ClaimDevice(ctx, dev.ID, user); err != nil && !errors.Is(err, store.ErrOwned) {
+		return err
+	}
+	items := map[string]string{}
 	for name, w := range files {
+		rf := store.RawFile{UserID: user, Source: "devseed", SourceName: "devseed-" + name, ReceivedAt: now}
 		if w.Workout != nil {
-			w.Workout.EstimatedS = estimate(w.Workout.Steps)
+			w.Workout.EstimatedS = fitwatch.Estimate(w.Workout.Steps)
+			items[name] = fmt.Sprintf("%016x-%016x", uint64(now.Unix()-631065600)<<32|uint64(len(items)+1), uint64(1)<<56|uint64(len(name)))
+			rf.DeviceID, rf.SourceName = dev.ID, items[name]+".fit"
+			rf.FIT = &store.FITIdentity{Type: store.WorkoutFITType, Manufacturer: 1, Serial: dev.UnitID, TimeCreated: now.AddDate(0, 0, -7).Unix()}
 		}
 		sum := sha256.Sum256([]byte(fmt.Sprintf("devseed|%d|watch|%s", user, name)))
-		f, _, err := st.AddRawFile(ctx, store.RawFile{SHA256: hex.EncodeToString(sum[:]), UserID: user, Source: "devseed", SourceName: "devseed-" + name,
-			ReceivedAt: now})
+		rf.SHA256 = hex.EncodeToString(sum[:])
+		f, _, err := st.AddRawFile(ctx, rf)
 		if err != nil {
 			return err
 		}
 		if err := st.WriteWatchFile(ctx, f, w); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
-	}
-	return nil
-}
-
-// estimate is a workout's timed length with its repeats (as fitwatch computes it).
-func estimate(steps []fitwatch.Step) int {
-	total := 0.0
-	for i, s := range steps {
-		switch {
-		case s.Duration == "time":
-			total += s.DurationValue
-		case s.Duration == "repeat" && s.Repeat > 1:
-			sub := 0.0
-			for _, x := range steps[s.From:i] {
-				if x.Duration == "time" {
-					sub += x.DurationValue
-				}
+		if w.Workout != nil {
+			if err := st.LinkWatchItem(ctx, dev.ID, items[name], "FIT_TYPE_5", f.ID); err != nil {
+				return err
 			}
-			total += sub * float64(s.Repeat-1)
 		}
 	}
-	return int(total)
+	// Garmin Connect's list, as its export brings it: Core 20 again, and two more.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("devseed|%d|connect-workouts", user)))
+	jf, _, err := st.AddRawFile(ctx, store.RawFile{SHA256: hex.EncodeToString(sum[:]), UserID: user, Source: store.SourceGCExport,
+		SourceName: "devseed/DI_CONNECT/DI-Connect-Fitness/devseed_workout.json", ReceivedAt: now})
+	if err != nil {
+		return err
+	}
+	connect := func(name, sport, sub, desc string, days int, steps ...fitwatch.Step) gcexport.Workout {
+		return gcexport.Workout{Workout: fitwatch.Workout{Name: name, Sport: sport, SubSport: sub, Steps: steps, EstimatedS: fitwatch.Estimate(steps)},
+			Description: desc, Updated: now.AddDate(0, 0, days)}
+	}
+	exp := &gcexport.Result{Kind: "workouts", Workouts: []gcexport.Workout{
+		connect("Core 20", "training", "strength_training", "Twenty minutes for the middle.", -30, files["workout-strength"].Workout.Steps...),
+		connect("Alignment 101", "training", "yoga", "Slow poses to find your lines.", -60,
+			fitwatch.Step{Index: 0, Intensity: "active", Duration: "time", DurationValue: 60, Exercise: &fitwatch.Exercise{Category: "pose", Name: "mountain", Number: 30}},
+			fitwatch.Step{Index: 1, Intensity: "active", Duration: "time", DurationValue: 60, Exercise: &fitwatch.Exercise{Category: "pose", Name: "downward_dog", Number: 17}}),
+		connect("10-Minute AMRAP", "hiit", "generic", "As many rounds as you can.", -90,
+			fitwatch.Step{Index: 0, Intensity: "active", Duration: "reps", DurationValue: 10, Exercise: &fitwatch.Exercise{Category: "squat", Name: "air_squat", Number: 4}},
+			fitwatch.Step{Index: 1, Intensity: "active", Duration: "reps", DurationValue: 10, Exercise: &fitwatch.Exercise{Category: "push_up", Name: "push_up", Number: 77}},
+			fitwatch.Step{Index: 2, Duration: "repeat_until_time", From: 0, DurationValue: 600}),
+	}}
+	if _, err := st.WriteExportFile(ctx, jf, exp, "devseed", 1); err != nil {
+		return err
+	}
+	// The watch took stock 20 minutes ago: Morning Mobility had been deleted there.
+	return st.SetWatchInventory(ctx, dev.ID, store.WatchInventory{Types: []string{"FIT_TYPE_5"}, At: now.Add(-20 * time.Minute), Items: []store.InventoryItem{
+		{UID: items["workout-intervals"], Type: "FIT_TYPE_5", Size: 400}, {UID: items["workout-strength"], Type: "FIT_TYPE_5", Size: 600}}})
 }
 
 // nightOf is the night that ends on day k: to bed about 22:30 the evening before, up about

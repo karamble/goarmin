@@ -191,6 +191,11 @@ func (c *Client) Run(ctx context.Context, req nodeproto.RunRequest) error {
 	return c.json(ctx, http.MethodPost, "/runs", req, nil)
 }
 
+// Inventory reports what a watch kept of some types at the end of a sync.
+func (c *Client) Inventory(ctx context.Context, req nodeproto.InventoryRequest) error {
+	return c.json(ctx, http.MethodPost, "/inventory", req, nil)
+}
+
 // History returns a watch's last sync runs.
 func (c *Client) History(ctx context.Context, unit uint32) (nodeproto.HistoryResponse, error) {
 	var out nodeproto.HistoryResponse

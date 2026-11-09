@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { WorkoutStep } from '../api/types'
-import { blocks, durationText, prettyExercise, stepTitle, strip, targetText } from './workout'
+import { blocks, durationText, prettyExercise, repeatText, stepTitle, strip, targetText } from './workout'
 
 const steps: WorkoutStep[] = [
   { index: 0, intensity: 'warmup', duration: 'time', duration_value: 600, target: 'heart_rate', target_zone: 2 },
@@ -20,6 +20,21 @@ describe('workout', () => {
     expect(b.map((x) => x.kind)).toEqual(['step', 'repeat', 'step'])
     expect(b[1]).toMatchObject({ kind: 'repeat', times: 6 })
     expect(b[1].kind === 'repeat' && b[1].steps.map((s) => s.index)).toEqual([1, 2])
+  })
+
+  it('folds a repeat for a time (an AMRAP) into a block with its rounds', () => {
+    const amrap: WorkoutStep[] = [
+      { index: 0, intensity: 'active', duration: 'time', duration_value: 40 },
+      { index: 1, intensity: 'rest', duration: 'time', duration_value: 20 },
+      { index: 2, duration: 'repeat_until_time', from: 0, duration_value: 600 },
+    ]
+    const b = blocks(amrap)
+    expect(b).toHaveLength(1)
+    expect(b[0]).toMatchObject({ kind: 'repeat', times: 10, forS: 600 })
+    expect(b[0].kind === 'repeat' && repeatText(b[0])).toBe('As many rounds as fit in 10:00')
+    expect(strip(amrap)).toHaveLength(20)
+    const b6 = blocks(steps)[1]
+    expect(b6.kind === 'repeat' && repeatText(b6)).toBe('6 times')
   })
 
   it('says durations and targets the way a runner reads them', () => {

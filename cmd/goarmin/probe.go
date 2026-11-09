@@ -16,11 +16,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/karamble/goarmin/internal/config"
+	"github.com/karamble/goarmin/internal/syncnode"
 	"github.com/karamble/goarmin/pkg/bluez"
 	"github.com/karamble/goarmin/pkg/cobs"
 	"github.com/karamble/goarmin/pkg/garmin/gfdi"
@@ -45,6 +47,7 @@ func runProbe(args []string, stdout, stderr io.Writer) int {
 	timeout := fs.Duration("timeout", 45*time.Second, "overall handshake timeout")
 	tracePath := fs.String("trace", "", "write every packet as JSONL here (default ~/goarmin-captures/linux-probe-<time>.jsonl; '-' disables)")
 	stay := fs.Bool("stay-connected", false, "leave the Bluetooth connection up afterwards")
+	inventory := fs.String("inventory", "", "list every item of these FIT types the watch keeps (comma-separated, e.g. 5 for workouts), synced or not; read-only")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: goarmin probe -device AA:BB:CC:DD:EE:FF [flags]\n\nConnects to a paired watch, runs the Multi-Link and GFDI handshake and prints what the\nwatch reports. Nothing is synced or archived.")
 		fs.PrintDefaults()
@@ -63,6 +66,13 @@ func runProbe(args []string, stdout, stderr io.Writer) int {
 	defer unlock()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *inventory != "" {
+		if err := probeInventory(ctx, stdout, *adapter, *device, *inventory, *timeout); err != nil {
+			fmt.Fprintln(stderr, "goarmin probe:", err)
+			return 1
+		}
+		return 0
+	}
 	o := probeOpts{adapter: *adapter, device: *device, client: *client, pair: *pairIdx, reliable: *reliable,
 		timeout: *timeout, trace: *tracePath, stay: *stay}
 	if err := probe(ctx, stdout, o); err != nil {
@@ -543,4 +553,40 @@ func openTrace(path string) (*json.Encoder, func(), error) {
 	}
 	fmt.Fprintln(os.Stderr, "trace:", path)
 	return json.NewEncoder(f), func() { f.Close() }, nil
+}
+
+// probeInventory lists what the watch keeps of some FIT types ("5" or "FIT_TYPE_5"), through
+// the sync's own handshake; nothing is fetched, flagged or saved.
+func probeInventory(ctx context.Context, out io.Writer, adapter, device, types string, timeout time.Duration) error {
+	addr, err := bluez.NormalizeAddress(device)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, t := range strings.Split(types, ",") {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if _, err := strconv.Atoi(t); err == nil {
+			t = "FIT_TYPE_" + t
+		}
+		names = append(names, t)
+	}
+	if len(names) == 0 {
+		return errors.New("-inventory needs at least one type")
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout+30*time.Second)
+	defer cancel()
+	start := time.Now()
+	id, items, err := syncnode.TakeStock(ctx, syncnode.IdentifyOptions{DataDir: config.DataDir(), Adapter: adapter, Address: addr}, names)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s (unit %d, firmware %s): %d items of %s, listed in %s\n", id.Record.Name, id.Record.Unit, id.Record.Firmware,
+		len(items), strings.Join(names, ", "), time.Since(start).Round(100*time.Millisecond))
+	for _, it := range items {
+		fmt.Fprintf(out, "  %s  %-12s %7d bytes  txn %d\n", it.UID, it.TypeName, it.Size, it.TransactionID)
+	}
+	return nil
 }

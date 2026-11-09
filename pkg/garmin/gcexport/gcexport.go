@@ -41,6 +41,7 @@ type Result struct {
 	Activities   []Activity
 	Gear         []Gear
 	Records      []Record
+	Workouts     []Workout
 	// Document is the file as plain values (JSON objects, a CSV's rows, a GPX's text) for
 	// files kept as documents; nil for the large metric files the tables hold.
 	Document any
@@ -268,6 +269,9 @@ func Read(p string, b []byte) (*Result, error) {
 		r.Document = v
 	case "personal_records":
 		r.records(v)
+		r.Document = v
+	case "workouts":
+		r.workouts(v)
 		r.Document = v
 	case "ecg":
 		r.ecg(v)

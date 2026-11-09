@@ -213,6 +213,10 @@ then on the node feeds the server.
 - **`goarmin healthcheck`** asks it on the same machine. The container's health check uses it.
 - **Logs:** one line per event, no tokens or personal data, on standard error (`make logs`, or
   the container's output).
+- **"The watch is not in range" while it is next to the computer:** the phone's Garmin Connect
+  is probably holding the watch, which then does not advertise to anyone else. Turning the
+  phone's Bluetooth off (or closing Garmin Connect) lets the next try through; *Sync now*
+  doesn't wait for the back-off.
 
 ## Configuration
 
@@ -252,7 +256,7 @@ The main flags of `serve`:
 | `serve` | The server (with `-with-sync`, the sync role too) |
 | `pair` | Pair and identify a watch in a terminal |
 | `sync -once` | One sync (`-no-archive` keeps files on the watch, `-include-synced` also fetches what another app took) |
-| `probe` | Connect and handshake only, print what the watch reports |
+| `probe` | Connect and handshake only, print what the watch reports; `-inventory 5` lists the workouts it keeps (read-only) |
 | `live` | Stream live values in the terminal |
 | `import -user EMAIL PATH…` | Import files, folders, zips, the export; `-usb` reads a watch on USB |
 | `usb` | List watches on USB; `-copy DIR` copies the `GARMIN` folder (read-only) |

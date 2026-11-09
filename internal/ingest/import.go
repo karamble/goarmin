@@ -11,6 +11,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -252,10 +254,38 @@ func (in *Ingester) importWatchBytes(ctx context.Context, dev store.Device, sour
 		}
 		users[owner] = u
 	}
-	if _, err := in.store(ctx, u, dev.ID, source, name, &prepared{b: b, info: info, ierr: ierr}, rep); err != nil {
+	sum, err := in.store(ctx, u, dev.ID, source, name, &prepared{b: b, info: info, ierr: ierr}, rep)
+	if err != nil {
 		return false, err
 	}
+	if ierr == nil && int(info.Type) == store.WorkoutFITType {
+		in.linkItem(ctx, dev, name, sum, int(info.Type))
+	}
 	return true, nil
+}
+
+// itemUID is the watch item a sync stored as name ("<uid>.fit", the uid as goarmin prints it).
+var itemUID = regexp.MustCompile(`^([0-9a-f]{16}-[0-9a-f]{16})\.fit$`)
+
+// linkItem records which file a watch's item is, for the workout library: the same bytes may
+// come again under a new item (a workout sent to the watch once more). A failure only costs the
+// link until the next inventory finds the file by its name.
+func (in *Ingester) linkItem(ctx context.Context, dev store.Device, name, sum string, fitType int) {
+	m := itemUID.FindStringSubmatch(strings.ToLower(name))
+	if m == nil {
+		return
+	}
+	rf, err := in.Store.RawFileBySHA(ctx, sum)
+	if err == nil {
+		file := rf.ID
+		if rf.DuplicateOf != 0 {
+			file = rf.DuplicateOf
+		}
+		err = in.Store.LinkWatchItem(ctx, dev.ID, m[1], "FIT_TYPE_"+strconv.Itoa(fitType), file)
+	}
+	if err != nil {
+		in.log().Warn("ingest: linking a watch item to its file", "file", name, "err", err)
+	}
 }
 
 // store records one file's bytes for user (linked to device, if not 0) and ingests it; p.dec,

@@ -785,4 +785,53 @@ CREATE TABLE node_enrollments (
 	token TEXT                                  -- handed to the node once, then cleared
 );
 `,
+	// 17: the workout library. A workout comes from a watch's workout file or from a Garmin
+	// Connect export (origin); the library groups the versions of one workout by name and
+	// sport. workout_files names every workout file a watch handed over (also one a newer
+	// version replaced). watch_items is what each watch keeps of the types a sync takes stock of
+	// (its workouts), item by item, linked to the file a sync stored it as; devices.inventory_at
+	// is when a watch last took stock.
+	`
+CREATE TABLE workouts_v17 (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL REFERENCES users(id),
+	origin TEXT NOT NULL DEFAULT 'watch',       -- watch, garmin_connect
+	device_id INTEGER NOT NULL,
+	name TEXT NOT NULL,
+	sport TEXT NOT NULL,
+	sub_sport TEXT NOT NULL,
+	steps TEXT NOT NULL,                        -- JSON steps
+	estimated_s INTEGER NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	recorded_at INTEGER NOT NULL,
+	raw_file_id INTEGER NOT NULL REFERENCES raw_files(id),
+	UNIQUE (user_id, origin, device_id, name, sport)
+);
+INSERT INTO workouts_v17 (id, user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id)
+	SELECT id, user_id, 'watch', device_id, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id FROM workouts;
+DROP TABLE workouts;
+ALTER TABLE workouts_v17 RENAME TO workouts;
+CREATE INDEX workouts_file ON workouts(raw_file_id);
+
+CREATE TABLE workout_files (
+	raw_file_id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL,
+	name TEXT NOT NULL,
+	sport TEXT NOT NULL
+);
+INSERT INTO workout_files (raw_file_id, user_id, name, sport) SELECT raw_file_id, user_id, name, sport FROM workouts;
+
+CREATE TABLE watch_items (
+	device_id INTEGER NOT NULL,
+	uid TEXT NOT NULL,                          -- the watch's item id, as goarmin prints it
+	type TEXT NOT NULL,                         -- FIT_TYPE_5
+	size INTEGER NOT NULL DEFAULT 0,
+	raw_file_id INTEGER,                        -- the file a sync stored it as (NULL: none yet)
+	listed_at INTEGER,                          -- the last inventory that listed it
+	gone_at INTEGER,                            -- the first inventory that no longer did
+	PRIMARY KEY (device_id, uid)
+) WITHOUT ROWID;
+CREATE INDEX watch_items_file ON watch_items(raw_file_id);
+ALTER TABLE devices ADD COLUMN inventory_at INTEGER;
+`,
 }

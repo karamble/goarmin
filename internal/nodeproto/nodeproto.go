@@ -134,6 +134,23 @@ type RunRequest struct {
 	DeleteSupport string        `json:"delete_support,omitempty"`
 }
 
+// InventoryRequest is what a watch kept of some GDXML types at the end of a sync (its workouts,
+// syncnode.InventoryTypes), for the workout library.
+type InventoryRequest struct {
+	Unit  uint32          `json:"unit"`
+	Types []string        `json:"types"`
+	At    time.Time       `json:"at"`
+	Items []InventoryItem `json:"items"`
+}
+
+// InventoryItem is one item of an InventoryRequest: the watch's item id as goarmin prints it,
+// its type and size.
+type InventoryItem struct {
+	UID  string `json:"uid"`
+	Type string `json:"type"`
+	Size uint64 `json:"size"`
+}
+
 // HistoryResponse is a watch's last sync runs, newest first.
 type HistoryResponse struct {
 	Runs []store.SyncRun `json:"runs"`

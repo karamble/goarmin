@@ -43,6 +43,13 @@ type Hander interface {
 	Hand(ctx context.Context, w Watch, f fileaccess.StoredFile) error
 }
 
+// Inventorier is a Backend that keeps what a watch has of the types a sync takes stock of
+// (syncnode.InventoryTypes: its workouts), for the workout library. A sync takes stock only for
+// a backend that is one.
+type Inventorier interface {
+	Inventory(ctx context.Context, w Watch, inv syncnode.Inventory) error
+}
+
 // Watch is how one watch is synced now.
 type Watch struct {
 	Addr       string
@@ -130,6 +137,25 @@ func (l Local) Finish(ctx context.Context, w Watch, out Outcome) error {
 	}
 	errs = append(errs, st.RecordSyncRun(ctx, out.Run))
 	return errors.Join(errs...)
+}
+
+var _ Inventorier = Local{}
+
+// Inventory implements Inventorier.
+func (l Local) Inventory(ctx context.Context, w Watch, inv syncnode.Inventory) error {
+	if w.DeviceID == 0 {
+		return nil
+	}
+	return l.In.Store.SetWatchInventory(ctx, w.DeviceID, StoreInventory(inv))
+}
+
+// StoreInventory is a sync's inventory as the store keeps it.
+func StoreInventory(inv syncnode.Inventory) store.WatchInventory {
+	out := store.WatchInventory{Types: inv.Types, At: inv.At}
+	for _, it := range inv.Items {
+		out.Items = append(out.Items, store.InventoryItem{UID: it.UID.String(), Type: it.TypeName, Size: it.Size})
+	}
+	return out
 }
 
 // History implements Backend.

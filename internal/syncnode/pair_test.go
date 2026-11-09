@@ -230,6 +230,29 @@ func fakeOpener(w *fakewatch.Watch) watch.Opener {
 	}
 }
 
+// TakeStock lists the watch's workouts and touches nothing: no pulls, no flags, no node.json.
+func TestTakeStockWith(t *testing.T) {
+	w := fakewatch.New(fakewatch.Options{})
+	a := w.AddFile("FIT_TYPE_5", []byte("a workout"))
+	w.AddFile("FIT_TYPE_32", []byte("monitoring"))
+	dir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	id, items, err := takeStockWith(ctx, IdentifyOptions{DataDir: dir, Address: addr}, InventoryTypes, fakeOpener(w), []int{0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Record.Unit != 3_500_000_001 || len(items) != 1 || items[0].UID != a.UID || items[0].TypeName != "FIT_TYPE_5" {
+		t.Fatalf("record %+v, items %+v", id.Record, items)
+	}
+	if st := w.Stats(); st.Pulls != 0 || st.Archives != 0 || st.TypedListings != 1 || w.Unsynced() != 2 {
+		t.Fatalf("taking stock touched files: %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node.json")); !os.IsNotExist(err) {
+		t.Fatalf("taking stock wrote node.json (%v)", err)
+	}
+}
+
 // Identify learns the watch from its handshake and battery report and saves nothing.
 func TestIdentifyWith(t *testing.T) {
 	w := fakewatch.New(fakewatch.Options{Battery: 64})

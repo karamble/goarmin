@@ -79,6 +79,9 @@ type Faults struct {
 	// DeleteResult, if it returns ok, answers DeleteItemRequest with that result and keeps
 	// the file.
 	DeleteResult func(f *File, attempt int) (r smart.DeleteItemResult, ok bool)
+	// RefuseTypedListings answers a listing filtered by data type with
+	// FAIL_INVALID_DATA_TYPE, as a watch might that knows no such filter.
+	RefuseTypedListings bool
 }
 
 // Options configures a fake watch. The zero value is a Fenix 8 on firmware 23.40.
@@ -133,6 +136,7 @@ type Stats struct {
 	PipeServices                                                          []multilink.Service
 	SystemEvents                                                          []byte // the event of each SYSTEM_EVENT, in order
 	FeatureRequests                                                       int    // FeatureCapabilitiesRequests answered
+	TypedListings                                                         int    // listings filtered by data type
 }
 
 // New returns a fake watch without files.
@@ -199,6 +203,19 @@ func (w *Watch) Files() []File {
 		out[i] = *f
 	}
 	return out
+}
+
+// RemoveFile takes a file off the watch as if its owner deleted it there; it reports whether
+// the watch had it.
+func (w *Watch) RemoveFile(uid smart.UUID) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	f := w.byUID[uid]
+	if f == nil {
+		return false
+	}
+	w.removeLocked(f)
+	return true
 }
 
 // AddUnwritten queues wellness data that the watch has not written into a file yet: it
@@ -509,8 +526,23 @@ func (c *conn) list(req *smart.ItemListRequest) *smart.ItemListResponse {
 			}
 		}
 		l = &listing{next: w.nextTxn}
+		types := map[string]bool{} // included_data_types by name; empty: every type
+		for _, dt := range req.IncludedDataTypes {
+			if dt.GDXMLString != nil {
+				types[*dt.GDXMLString] = true
+			}
+		}
+		if len(req.IncludedDataTypes) > 0 {
+			w.stats.TypedListings++
+			if w.opt.Faults.RefuseTypedListings {
+				return &smart.ItemListResponse{Status: smart.Ptr(smart.ItemListFailInvalidDataType)}
+			}
+		}
 		for _, f := range w.files {
 			if excludeSynced && f.Synced {
+				continue
+			}
+			if len(types) > 0 && !types[f.TypeName] {
 				continue
 			}
 			if req.TransactionID != nil && f.TransactionID < *req.TransactionID {

@@ -18,7 +18,7 @@ import (
 // again on the next Pending run.
 const (
 	ExportHandler = "gcjson"
-	ExportVersion = 1
+	ExportVersion = 2 // 2: Garmin Connect's workouts join the workout library
 )
 
 // exportFile reads one kept export file from b (nil: from the blob store) and writes what it

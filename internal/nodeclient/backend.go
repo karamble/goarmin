@@ -176,6 +176,24 @@ func (r *Remote) Finish(ctx context.Context, w nodehub.Watch, out nodehub.Outcom
 	return nil
 }
 
+var _ nodehub.Inventorier = (*Remote)(nil)
+
+// Inventory implements nodehub.Inventorier: what the watch keeps goes to the server, best effort
+// (the next sync's inventory replaces it anyway). A server from before the workout library
+// answers 404, which is not an error.
+func (r *Remote) Inventory(ctx context.Context, w nodehub.Watch, inv syncnode.Inventory) error {
+	req := nodeproto.InventoryRequest{Unit: w.Unit, Types: inv.Types, At: inv.At, Items: []nodeproto.InventoryItem{}}
+	for _, it := range inv.Items {
+		req.Items = append(req.Items, nodeproto.InventoryItem{UID: it.UID.String(), Type: it.TypeName, Size: it.Size})
+	}
+	err := r.c.Inventory(ctx, req)
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
 // flush sends the sync runs the server missed.
 func (r *Remote) flush(ctx context.Context) {
 	r.mu.Lock()

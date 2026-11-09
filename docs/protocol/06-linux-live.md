@@ -421,3 +421,24 @@ range (`hrv_last_night`, `hrv_target_low/high`). After a reingest, the user's ac
   and a few single files.
 - `Sleep`, `HRVStatus`, `SkinTemp` and `SlpDisr` were empty at 01:30; `Metrics` held only the
   two files Bluetooth had brought. Whether a night fills them is still open.
+
+## Taking stock of the workouts (2026-11-09)
+
+- **A listing filtered by type works on the Fenix 8.** `ItemListRequest { get_flags: 0xA5A5,
+  included_data_types { format: GDXML_DATA_TYPE, gdxml_string: "FIT_TYPE_5" } }`, without a
+  cursor and without `exclude_all_flags`, lists every workout the watch keeps, synced or not,
+  and nothing else: 27 items, the whole session (scan, connect, handshake, listing) in 6.4 s.
+  Garmin Connect filters by format the same way for its GDXML device file (05 §8).
+- goarmin runs it at the end of every sync (`fileaccess.Engine.Inventory`; read-only: no cursor,
+  no flags) for the workout library, and `goarmin probe -device … -inventory 5` runs it alone.
+  A watch that refused the filter would get one unfiltered listing, filtered by goarmin.
+- **Garmin Connect replaces a workout with a new item.** Of the 11 workouts on the watch on
+  2026-11-08, the three breathing workouts came back on 2026-11-09 under new item ids (same item
+  number, a new timestamp in the uid's upper half, a different size) after workouts were added
+  from Garmin's library on the phone; the eight others kept their ids.
+- **While Garmin Connect on the phone holds the watch, the laptop cannot reach it.** From 10:44
+  every sync and the probe found the watch "not in range": a 20 s LE scan heard 7 other devices
+  and no advertisement from the watch, while it was next to the laptop. The phone's app was
+  connected (workouts had just been sent). With the phone's Bluetooth off, the probe connected
+  at once and the next sync pulled the 21 waiting files. A Bluetooth headset connected to the
+  laptop at the same time was not the cause (the scan saw the same with it off).

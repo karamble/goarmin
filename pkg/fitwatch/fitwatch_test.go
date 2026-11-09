@@ -184,6 +184,60 @@ func TestWorkout(t *testing.T) {
 	}
 }
 
+// An AMRAP: two timed steps repeated until 10 minutes are up.
+func TestWorkoutRepeatUntilTime(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	w := mesgdef.NewWorkout(nil)
+	w.WktName, w.Sport, w.NumValidSteps = "AMRAP", typedef.SportTraining, 3
+	step := func(i int, f func(s *mesgdef.WorkoutStep)) proto.Message {
+		s := mesgdef.NewWorkoutStep(nil)
+		s.MessageIndex = typedef.MessageIndex(i)
+		f(s)
+		return s.ToMesg(nil)
+	}
+	b := fittest.Build(typedef.FileWorkout, serial, now, w.ToMesg(nil),
+		step(0, func(s *mesgdef.WorkoutStep) {
+			s.Intensity, s.DurationType, s.DurationValue = typedef.IntensityActive, typedef.WktStepDurationTime, 40000
+		}),
+		step(1, func(s *mesgdef.WorkoutStep) {
+			s.Intensity, s.DurationType, s.DurationValue = typedef.IntensityRest, typedef.WktStepDurationTime, 20000
+		}),
+		step(2, func(s *mesgdef.WorkoutStep) {
+			s.DurationType, s.DurationValue, s.TargetValue = typedef.WktStepDurationRepeatUntilTime, 0, 600000
+		}),
+	)
+	f, err := Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := f.Workout.Steps[2]
+	if r.Duration != "repeat_until_time" || r.From != 0 || r.DurationValue != 600 || !IsRepeat(r) || r.Target != "" {
+		t.Fatalf("repeat %+v", r)
+	}
+	if f.Workout.EstimatedS != 600 {
+		t.Fatalf("estimate %d, want the 10 minutes", f.Workout.EstimatedS)
+	}
+}
+
+func TestExerciseNumber(t *testing.T) {
+	for _, c := range []struct {
+		cat, name string
+		want      int
+		ok        bool
+	}{
+		{"plank", "side_plank", 66, true},
+		{"PLANK", "PLANK_WITH_ARM_RAISE", 54, true},
+		{"core", "the_hundred", 72, true},
+		{"pose", "no_such_pose", 0, false},
+		{"no_such_category", "plank", 0, false},
+	} {
+		n, ok := ExerciseNumber(c.cat, c.name)
+		if n != c.want || ok != c.ok {
+			t.Errorf("ExerciseNumber(%q, %q) = %d, %v; want %d, %v", c.cat, c.name, n, ok, c.want, c.ok)
+		}
+	}
+}
+
 func TestCourse(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	c := mesgdef.NewCourse(nil)

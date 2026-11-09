@@ -11,9 +11,10 @@ import type { WorkoutStep } from '../../api/types'
 import { useSectionTitle } from '../../app/section/HeaderSlot'
 import { hm, type Units } from '../../lib/format'
 import { FigureDialog, type FigureItem } from '../../figures/FigureDialog'
-import { blocks, durationText, intensityTone, stepTitle, strip, targetText } from '../../lib/workout'
+import { blocks, durationText, intensityTone, repeatText, stepTitle, strip, targetText } from '../../lib/workout'
+import { originText, sportWords } from '../../lib/workoutLibrary'
 import { Card, Kpis, Loaded } from '../health/parts'
-import { sportWords } from './Workouts'
+import { Presence } from './Workouts'
 
 /** Workout shows a saved workout's steps, repeats as blocks, and its intensity over time. */
 export default function WorkoutPage() {
@@ -31,7 +32,7 @@ export default function WorkoutPage() {
         const steps = w.steps ?? []
         const segs = strip(steps)
         const total = segs.reduce((a, s) => a + (s.s || 60), 0)
-        const exercises = new Set(steps.filter((s) => s.exercise).map((s) => s.exercise!.name)).size
+        const exercises = new Set(steps.filter((s) => s.exercise).map((s) => `${s.exercise!.category}/${s.exercise!.number}`)).size
         const figures = figureItems(steps, units)
         const pose = (s: WorkoutStep) => {
           const i = s.exercise ? figures.findIndex((f) => f.category === s.exercise!.category && f.number === s.exercise!.number) : -1
@@ -55,6 +56,11 @@ export default function WorkoutPage() {
                   <span key={k} className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-[2px]" style={{ background: intensityTone(k) }} />{label}</span>
                 ))}
               </p>
+              <div className="mt-5 flex flex-wrap items-center gap-2" aria-label="Where it is">
+                {(w.watches ?? []).map((x) => <Presence key={x.device_id} x={x} long />)}
+                <span className="text-[12px] text-muted">{originText(w.origins ?? [w.origin])}</span>
+              </div>
+              {w.description && <p className="m-0 mt-3 max-w-[72ch] text-[14px] text-muted">{w.description}</p>}
             </section>
             <Card title="Steps">
               <ol className="m-0 grid list-none gap-2 p-0">
@@ -63,7 +69,7 @@ export default function WorkoutPage() {
                 ) : (
                   <li key={i} className="rounded-xl border border-border p-2.5">
                     <p className="m-0 mb-2 flex items-center gap-2 px-1 font-mono text-[11px] uppercase tracking-[.14em] text-lime">
-                      <Repeat size={13} aria-hidden /> {b.times} times
+                      <Repeat size={13} aria-hidden /> {repeatText(b)}
                     </p>
                     <ol className="m-0 grid list-none gap-2 p-0">
                       {b.steps.map((s) => <StepRow key={s.index} s={s} units={units} onPose={pose(s)} />)}
@@ -71,7 +77,9 @@ export default function WorkoutPage() {
                   </li>
                 ))}
               </ol>
-              <p className="m-0 mt-4 text-[12px] text-faint">As saved on the watch, {new Date(w.recorded_at * 1000).toLocaleDateString()}.</p>
+              <p className="m-0 mt-4 text-[12px] text-faint">
+                {w.origin === 'watch' ? 'As saved on the watch' : 'As saved in Garmin Connect'}, {new Date(w.recorded_at * 1000).toLocaleDateString()}.
+              </p>
             </Card>
             {figure !== null && figures.length > 0 && <FigureDialog items={figures} start={figure} onClose={() => setFigure(null)} />}
           </div>

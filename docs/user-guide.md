@@ -66,9 +66,17 @@ the same numbers.
   ability; *All* shows every year you have.
 - **Coach.** Garmin Coach's plan for the week, with what you did ticked off.
 - **Workouts** and **Courses.**
-  - Workouts: the ones saved on the watch, with their steps, repeats and targets. A step with an
-    exercise has **View pose**: a 3D figure of the movement in a dialog that steps through the
-    workout's exercises (Previous and Next, or ← and →).
+  - Workouts is your **workout library**: every workout goarmin keeps, from the watch and from
+    your Garmin Connect export (Devices › Import), once each, kept also after it leaves the
+    watch.
+    - Each card says, per watch, whether the watch has it now (*On*), had it and no longer does
+      (*Removed*), or never had it. The line on top counts what each watch holds and when the
+      last sync checked.
+    - Search by name or sport, and filter by sport, source and *On ‹watch›* or *On no watch*.
+      The filters stay in the address, so a view can be bookmarked.
+    - A workout shows its steps, repeats and targets. A step with an exercise has **View pose**:
+      a 3D figure of the movement in a dialog that steps through the workout's exercises
+      (Previous and Next, or ← and →).
   - Courses: route, elevation profile, course points and the FIT file.
 - **Exercises.** Every exercise a Garmin workout can name (1,846), by category, with a search.
   - Pick one to see its figure: a see-through mannequin that holds the pose or moves through it.

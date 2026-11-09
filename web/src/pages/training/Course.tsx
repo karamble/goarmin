@@ -16,7 +16,7 @@ import { distance, elevation } from '../../lib/format'
 import { ActivityMap } from '../../map/ActivityMap'
 import { ActivityRoute, ramps } from '../../map/ActivityRoute'
 import { Card, chartCtx, Kpis, Loaded } from '../health/parts'
-import { sportWords } from './Workouts'
+import { sportWords } from '../../lib/workoutLibrary'
 
 const pointWords: Record<string, string> = {
   left: 'Turn left', right: 'Turn right', slight_left: 'Bear left', slight_right: 'Bear right', sharp_left: 'Sharp left', sharp_right: 'Sharp right',

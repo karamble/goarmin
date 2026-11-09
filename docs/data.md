@@ -62,6 +62,7 @@ Garmin's data export is a zip of zips. goarmin recognises it by its `DI_CONNECT/
 | Health snapshots | Snapshot summaries |
 | Summarized activities | Extra fields on the watch's activities, or activities of their own until a FIT file replaces them |
 | Gear, personal records, ECG | Training › Gear and Records; ECGs the watch's files lack |
+| Workouts | The account's Garmin Connect workouts in the workout library (Training › Workouts): sports as a watch writes them, steps flattened, exercises by their FIT numbers |
 | Profile, settings, goals, workouts, courses, golf clubs, device registrations, orders, consents, social data, Connect IQ, LiveTrack, inReach, media | Account documents (Settings › Account data) |
 
 ## When two sources disagree
@@ -83,6 +84,26 @@ flowchart LR
   parts --> merge{"overlap?"}
   merge --> night["One night:<br/>times and stages from 49,<br/>else 72, else JSON;<br/>scores, lowest HR, Body Battery<br/>from whichever has them"]
 ```
+
+## The workout library
+
+Training › Workouts lists every workout goarmin keeps, once each, whether a watch has it now
+or not:
+
+- **Versions.** A watch's workout file and Garmin Connect's list (from the export) can hold the
+  same workout. Versions with the same name (case and spacing aside) and sport are one workout;
+  the page shows a watch's version, which is what the watch runs, and says where the others came
+  from.
+- **The Connect format.** Connect's step types become intensities (interval → active), its
+  repeat groups become a watch's repeat steps, its exercise names their FIT numbers. Checked on
+  a real export: the seven workouts that were also on the Fenix 8 come out step for step the
+  same as the watch's files. An AMRAP (Connect's "iterations" in milliseconds) becomes a repeat
+  for a time.
+- **On the watch or not.** At the end of each sync the watch lists every workout it keeps
+  (synced or not, read-only), and the server records the list per watch. A workout is *on* a
+  watch while it is listed, and *removed* once it no longer is (deleted on the watch, or by
+  Garmin Connect). A workout file is stored under its item's id (`<uid>.fit`), so a listed item
+  finds its workout; the same bytes sent to the watch again under a new item find it too.
 
 ## Time and days
 

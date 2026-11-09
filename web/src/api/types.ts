@@ -304,6 +304,33 @@ export interface WorkoutStep {
   weight_kg?: number
 }
 
+/** Where a stored workout came from: a watch's workout file, or a Garmin Connect export. */
+export type WorkoutOrigin = 'watch' | 'garmin_connect'
+
+/** Where a library workout is, seen from one watch: on it now, removed from it (on the watch or
+ * by Garmin Connect), never on it, or not known yet (the watch has not been checked). */
+export type WorkoutPresence = 'on' | 'removed' | 'absent' | 'unknown'
+
+export interface WorkoutWatch {
+  device_id: number
+  name: string
+  state: WorkoutPresence
+  /** on: when the watch last listed it; removed: when it first did not. */
+  since?: number
+  /** When the watch last listed its workouts (absent: not yet). */
+  checked_at?: number
+}
+
+export interface WorkoutVersion {
+  id: number
+  origin: WorkoutOrigin
+  device_id: number
+  recorded_at: number
+  step_count: number
+}
+
+/** A workout of the library: the version shown (a watch's if there is one), where its versions
+ * came from, and on which of the account's watches it is. */
 export interface Workout {
   id: number
   name: string
@@ -311,8 +338,14 @@ export interface Workout {
   sub_sport: string
   estimated_s: number
   step_count: number
+  exercise_count: number
   recorded_at: number
+  origin: WorkoutOrigin
+  origins: WorkoutOrigin[]
+  description?: string
+  watches: WorkoutWatch[]
   steps?: WorkoutStep[]
+  versions?: WorkoutVersion[]
 }
 
 export interface CoursePoint {

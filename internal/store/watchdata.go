@@ -26,7 +26,7 @@ func recordedAt(f RawFile, w *fitwatch.File) int64 {
 	return f.ReceivedAt.Unix()
 }
 
-var watchTables = []string{"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "courses",
+var watchTables = []string{"watch_settings", "sport_profiles", "watch_goals", "lifetime_totals", "workouts", "workout_files", "courses",
 	"gear", "golf_clubs", "personal_records", "settings_changes", "device_series", "device_documents"}
 
 // WriteWatchFile replaces what a settings, sport, workout, course, totals or goals file
@@ -96,12 +96,17 @@ func (s *Store) WriteWatchFile(ctx context.Context, f RawFile, w *fitwatch.File)
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, device_id, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (user_id, device_id, name, sport) DO UPDATE SET sub_sport = excluded.sub_sport, steps = excluded.steps,
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (user_id, origin, device_id, name, sport) DO UPDATE SET sub_sport = excluded.sub_sport, steps = excluded.steps,
 					estimated_s = excluded.estimated_s, recorded_at = excluded.recorded_at, raw_file_id = excluded.raw_file_id
 				WHERE excluded.recorded_at >= workouts.recorded_at`,
-				f.UserID, f.DeviceID, wk.Name, wk.Sport, wk.SubSport, steps, wk.EstimatedS, at, f.ID); err != nil {
+				f.UserID, OriginWatch, f.DeviceID, wk.Name, wk.Sport, wk.SubSport, steps, wk.EstimatedS, at, f.ID); err != nil {
+				return err
+			}
+			// Every version is named, also one a newer file replaces above: the watch may keep it.
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workout_files (raw_file_id, user_id, name, sport) VALUES (?, ?, ?, ?)`,
+				f.ID, f.UserID, wk.Name, wk.Sport); err != nil {
 				return err
 			}
 		}
@@ -262,23 +267,32 @@ func (s *Store) LifetimeTotals(ctx context.Context, user int64) ([]TotalsRow, er
 	return out, rows.Err()
 }
 
+// Where a stored workout came from.
+const (
+	OriginWatch         = "watch"          // a watch's workout file
+	OriginGarminConnect = "garmin_connect" // a Garmin Connect export's workout list
+)
+
 // WorkoutRow is a stored workout.
 type WorkoutRow struct {
-	ID         int64
-	DeviceID   int64
-	RecordedAt time.Time
+	ID          int64
+	Origin      string // OriginWatch, OriginGarminConnect
+	DeviceID    int64  // the watch it came from (0: unknown, or Garmin Connect)
+	Description string
+	RecordedAt  time.Time
 	fitwatch.Workout
 }
 
-// Workouts returns user's saved workouts by name; with id > 0 only that one (or ErrNotFound).
+// Workouts returns user's stored workouts by name, every version of each; with id > 0 only that
+// one (or ErrNotFound).
 func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, error) {
-	q := `SELECT id, device_id, name, sport, sub_sport, steps, estimated_s, recorded_at FROM workouts WHERE user_id = ?`
+	q := `SELECT id, origin, device_id, description, name, sport, sub_sport, steps, estimated_s, recorded_at FROM workouts WHERE user_id = ?`
 	args := []any{user}
 	if id > 0 {
 		q += ` AND id = ?`
 		args = append(args, id)
 	}
-	rows, err := s.db.R.QueryContext(ctx, q+` ORDER BY name COLLATE NOCASE`, args...)
+	rows, err := s.db.R.QueryContext(ctx, q+` ORDER BY name COLLATE NOCASE, id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +302,7 @@ func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, err
 		var r WorkoutRow
 		var steps string
 		var at int64
-		if err := rows.Scan(&r.ID, &r.DeviceID, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at); err != nil {
+		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at); err != nil {
 			return nil, err
 		}
 		r.RecordedAt = time.Unix(at, 0)
