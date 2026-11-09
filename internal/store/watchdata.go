@@ -100,13 +100,19 @@ func (s *Store) WriteWatchFile(ctx context.Context, f RawFile, w *fitwatch.File)
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at, raw_file_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			extra, err := extraJSON(wk.Extra)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, entry_key, name, sport, sub_sport, steps, estimated_s,
+				description, extra, recorded_at, raw_file_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (user_id, origin, device_id, name, sport) DO UPDATE SET sub_sport = excluded.sub_sport, steps = excluded.steps,
-					estimated_s = excluded.estimated_s, recorded_at = excluded.recorded_at, raw_file_id = excluded.raw_file_id,
+					estimated_s = excluded.estimated_s, description = excluded.description, extra = excluded.extra,
+					recorded_at = excluded.recorded_at, raw_file_id = excluded.raw_file_id,
 					entry_key = CASE WHEN excluded.entry_key <> '' THEN excluded.entry_key ELSE workouts.entry_key END
 				WHERE excluded.recorded_at >= workouts.recorded_at`,
-				f.UserID, OriginWatch, f.DeviceID, entry, wk.Name, wk.Sport, wk.SubSport, steps, wk.EstimatedS, at, f.ID); err != nil {
+				f.UserID, OriginWatch, f.DeviceID, entry, wk.Name, wk.Sport, wk.SubSport, steps, wk.EstimatedS, wk.Description, extra, at, f.ID); err != nil {
 				return err
 			}
 			// Every version is named, also one a newer file replaces above: the watch may keep it.
@@ -279,20 +285,30 @@ const (
 	OriginGoarmin       = "goarmin"        // renamed or edited in goarmin (no file)
 )
 
-// WorkoutRow is a stored workout.
+// WorkoutRow is a stored workout (its description is the Workout's).
 type WorkoutRow struct {
-	ID          int64
-	Origin      string // OriginWatch, OriginGarminConnect, OriginGoarmin
-	DeviceID    int64  // the watch it came from (0: unknown, Garmin Connect or goarmin)
-	Description string
-	RecordedAt  time.Time
+	ID         int64
+	Origin     string // OriginWatch, OriginGarminConnect, OriginGoarmin
+	DeviceID   int64  // the watch it came from (0: unknown, Garmin Connect or goarmin)
+	RecordedAt time.Time
 	// EntryKey is the library entry the version belongs to: the key of its name and sport
 	// (WorkoutKey), or of the entry a renamed workout began in.
 	EntryKey string
 	// RawFileID is the file a watch's or Garmin Connect's version was read from (0: goarmin's
-	// own).
+	// own); FileSHA the sha of the file a watch gets of it: its file's, or the file goarmin's
+	// own is written as ("" until it was).
 	RawFileID int64
+	FileSHA   string
 	fitwatch.Workout
+}
+
+// extraJSON is a workout's kept file fields as stored ("" for none).
+func extraJSON(x *fitwatch.WorkoutExtra) (string, error) {
+	if x == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(x)
+	return string(b), err
 }
 
 // entryKeyOf is the library entry a new version of a workout named name in sport joins: the
@@ -321,7 +337,8 @@ func entryKeyOf(ctx context.Context, tx *sql.Tx, user int64, name, sport string)
 // Workouts returns user's stored workouts by name, every version of each; with id > 0 only that
 // one (or ErrNotFound).
 func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, error) {
-	q := `SELECT id, origin, device_id, description, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at, COALESCE(raw_file_id, 0)
+	q := `SELECT id, origin, device_id, description, entry_key, name, sport, sub_sport, steps, estimated_s, recorded_at, COALESCE(raw_file_id, 0),
+		extra, CASE WHEN origin = 'watch' THEN COALESCE((SELECT r.sha256 FROM raw_files r WHERE r.id = raw_file_id), '') ELSE file_sha256 END
 		FROM workouts WHERE user_id = ?`
 	args := []any{user}
 	if id > 0 {
@@ -336,10 +353,17 @@ func (s *Store) Workouts(ctx context.Context, user, id int64) ([]WorkoutRow, err
 	var out []WorkoutRow
 	for rows.Next() {
 		var r WorkoutRow
-		var steps string
+		var steps, extra string
 		var at int64
-		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.EntryKey, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at, &r.RawFileID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Origin, &r.DeviceID, &r.Description, &r.EntryKey, &r.Name, &r.Sport, &r.SubSport, &steps, &r.EstimatedS, &at, &r.RawFileID,
+			&extra, &r.FileSHA); err != nil {
 			return nil, err
+		}
+		if extra != "" {
+			r.Extra = &fitwatch.WorkoutExtra{}
+			if err := json.Unmarshal([]byte(extra), r.Extra); err != nil {
+				return nil, err
+			}
 		}
 		r.RecordedAt = time.Unix(at, 0)
 		if r.EntryKey == "" {

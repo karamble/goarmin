@@ -52,25 +52,48 @@ A push takes about 2 s on the Fenix 8.
 
 ## Workout files
 
-Garmin Connect's workout files, as pushed (goarmin's `fitwatch.EncodeWorkout` writes the same):
+Garmin Connect's workout files, as the Fenix 8 hands them over (31 files: Connect's pushes and the
+workouts it keeps). goarmin's `fitwatch.EncodeWorkout` writes the same: each of the 31, read and
+written again, compares equal message by message and field by field (`fitwatch.Compare`, the
+opt-in `TestEncodeLikeGarminFiles`).
 
-- **Records:** big-endian definitions.
+- **Records:** big-endian definitions. Messages in this order:
+  1. file_id, then file_creator;
+  2. workout, and right after it the description's memo;
+  3. each step, followed by its notes' memo;
+  4. the exercise titles.
 - **file_id:** type 5, manufacturer 1 (Garmin), product 65534 (Garmin Connect), `time_created`
   and a `serial_number` of its own per file; no `number`.
-- **file_creator:** software 2621, hardware 0.
+- **file_creator:** software 2621, hardware 0. Older files (2023) say 2517.
 - **workout:**
-  - `wkt_name`, `wkt_description`, sport, sub sport, capabilities 32, `num_valid_steps`;
-  - a total duration in fields 9 (`duration_type` time), 10 and 21 (milliseconds), with 23
-    (`time_flag`) = 0;
-  - field 16: 16 bytes, zeros (one file ended in `01`).
+  - `wkt_name`, sport, sub sport, capabilities 32, `num_valid_steps`.
+  - **`wkt_description`:** at most 160 bytes, a longer text cut to 157 bytes and "...". The
+    whole text is in a `memo_glob` (mesg 26, parent 0, field 17): one part (the text and its
+    zero), or parts of 255 bytes numbered by `part_index`, the last padded with zeros.
+  - **The total time:** fields 10 and 21 (milliseconds), with 9 = 0 and 23 = 0 (enums). The
+    total is a stated figure, not a sum of the steps: Garmin's library workouts state round
+    times (300, 600, 1,800 s) that count repetitions at anything from 2 to 9 s.
+  - **Field 16:** 16 bytes. All zeros for a user's workout, the last byte 1 mostly for Garmin's
+    own library content (partner content such as Gold's Gym ends in 0).
+  - **Garmin's originals:** some add 9 = 1, 22 = 0 (uint32) and 24 = 0 (enum).
 - **workout_step:**
-  - a step without a target carries no target type, only zero `target_value` and
-    `secondary_target_value`. Rest steps carry `open` for both targets;
-  - the note is in `notes` and again in full as a `memo_glob` (mesg 27, field 8, zero-terminated);
-  - exercises carry category and number, and `weight_display_unit` kilogram on every step;
-  - **a repeat step** has `duration_type` 6, `duration_value` = the index of its first step,
-    `target_value` = the count, and no intensity.
-- **exercise_title:** one per exercise, with its display name.
+  - **A rest:** intensity rest, target type open, secondary target type open.
+  - **An exercise for reps:** target type open. An exercise for time has no target (or open).
+  - **Every step:** `target_value` 0, `secondary_target_value` 0 (unless it has a target), and
+    `weight_display_unit` kilogram.
+  - **A repeat step:** `duration_type` 6, `duration_value` = the index of its first step,
+    `target_value` = the count, the undocumented **field 18 = 0** (an enum), and nothing else.
+    Connect's JSON has `skipLastRestStep` and `smartRepeat` per repeat, both false; field 18 is
+    likely one of them.
+  - **An AMRAP:** `duration_type` 7, `target_value` its time in ms; no field 18.
+  - **Notes:** the whole text in `notes` and again in a `memo_glob` (mesg 27, the step's index,
+    field 8).
+  - **Strength sets:** always [the exercise for reps, a rest for time] in a repeat. Repeats are
+    one level deep.
+- **exercise_title:** one per distinct exercise, with its display name. Garmin's order follows
+  nothing in the workout (a hash map's, likely); goarmin keeps the order of a file it read.
+- **An older writer** (Garmin's own content from 2023) leaves out the description memo, the
+  secondary target values and the exercise titles. goarmin keeps that too for such a file.
 
 ## Schedule files: the whole calendar
 

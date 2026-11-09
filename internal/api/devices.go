@@ -450,7 +450,7 @@ func (s *Server) syncLog(w http.ResponseWriter, r *http.Request, u store.User) {
 func syncRunJSON(x store.SyncRun) map[string]any {
 	return map[string]any{"id": x.ID, "device_id": x.DeviceID, "started_by": x.StartedBy, "started_at": x.Started.Unix(),
 		"finished_at": x.Finished.Unix(), "ok": x.OK, "listed": x.Listed, "failed": x.Failed, "pulled": x.Pulled,
-		"archived": x.Archived, "deleted": x.Deleted, "bytes": x.Bytes, "imported": x.Imported, "error": x.Error,
+		"archived": x.Archived, "deleted": x.Deleted, "bytes": x.Bytes, "imported": x.Imported, "sent": x.Sent, "error": x.Error,
 		"error_code": x.ErrorCode}
 }
 

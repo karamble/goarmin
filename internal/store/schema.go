@@ -942,4 +942,20 @@ CREATE TABLE watch_sends (
 ) WITHOUT ROWID;
 ALTER TABLE devices ADD COLUMN send_support TEXT NOT NULL DEFAULT '';
 `,
+	// 22: the workout builder. workouts.extra keeps what a workout file's workout message held
+	// beyond the FIT profile (JSON, fitwatch.WorkoutExtra), so the workout written again matches
+	// its file; file_sha256 is the sha of the file a goarmin version is written as. A workout
+	// hidden from the library (workout_hidden) shows again while a watch has it. sync_runs.sent
+	// counts the files a sync pushed to the watch.
+	`
+ALTER TABLE workouts ADD COLUMN extra TEXT NOT NULL DEFAULT '';
+ALTER TABLE workouts ADD COLUMN file_sha256 TEXT NOT NULL DEFAULT '';
+CREATE TABLE workout_hidden (
+	user_id INTEGER NOT NULL,
+	entry_key TEXT NOT NULL,
+	at INTEGER NOT NULL,
+	PRIMARY KEY (user_id, entry_key)
+) WITHOUT ROWID;
+ALTER TABLE sync_runs ADD COLUMN sent INTEGER NOT NULL DEFAULT 0;
+`,
 }

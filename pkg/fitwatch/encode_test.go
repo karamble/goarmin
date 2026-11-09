@@ -7,9 +7,11 @@ package fitwatch
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +46,8 @@ func strength() Workout {
 func TestEncodeWorkoutRoundTrip(t *testing.T) {
 	created := time.Now().Truncate(time.Second)
 	for _, w := range []Workout{intervals(), strength()} {
-		b, err := EncodeWorkout(w, "A description", EncodeOptions{Serial: 1_757_016_972, Created: created})
+		w.Description = "A description"
+		b, err := EncodeWorkout(w, EncodeOptions{Serial: 1_757_016_972, Created: created})
 		if err != nil {
 			t.Fatalf("%s: %v", w.Name, err)
 		}
@@ -57,13 +60,21 @@ func TestEncodeWorkoutRoundTrip(t *testing.T) {
 		}
 		got := *f.Workout
 		want := w
-		want.EstimatedS = Estimate(w.Steps)
-		for i := range want.Steps {
-			// Notes over 50 characters are cut in the step and kept whole in the memo; the
-			// reader takes the step's.
-			if len(want.Steps[i].Notes) > 50 {
-				want.Steps[i].Notes = want.Steps[i].Notes[:50]
+		// A workout made in goarmin gets Garmin Connect's fields for a user's workout, the total
+		// from Total, which the reader takes as the workout's time.
+		zero, ms, sw := uint8(0), uint32(Total(w.Steps))*1000, uint16(garminConnectSoftware)
+		want.Extra = &WorkoutExtra{Software: &sw, F9: &zero, F10: &ms, F16: make([]byte, 16), F21: &ms, F23: &zero}
+		for _, st := range w.Steps { // the titles in the order of their first step
+			if e := st.Exercise; e != nil {
+				k := [2]uint16{uint16(typedef.ExerciseCategoryFromString(e.Category)), uint16(e.Number)}
+				if !slices.Contains(want.Extra.Titles, k) {
+					want.Extra.Titles = append(want.Extra.Titles, k)
+				}
 			}
+		}
+		want.EstimatedS = Total(w.Steps)
+		for i := range want.Steps {
+			// Notes are whole: the step's field holds 50 characters, the memo all of them.
 			if want.Steps[i].Exercise != nil {
 				e := *want.Steps[i].Exercise
 				e.Name = e.Title
@@ -83,7 +94,7 @@ func TestEncodeWorkoutRoundTrip(t *testing.T) {
 // them (docs/protocol/08): the file_id, the total time, notes as a memo and exercise titles.
 func TestEncodeWorkoutAsGarminConnect(t *testing.T) {
 	created := time.Now().Truncate(time.Second)
-	b, err := EncodeWorkout(strength(), "", EncodeOptions{Serial: 42, Created: created})
+	b, err := EncodeWorkout(strength(), EncodeOptions{Serial: 42, Created: created})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +111,7 @@ func TestEncodeWorkoutAsGarminConnect(t *testing.T) {
 				t.Errorf("file_id %+v", id)
 			}
 		case typedef.MesgNumWorkout:
-			if f := m.FieldByNum(21); f == nil || f.Value.Uint32() != uint32(Estimate(strength().Steps))*1000 {
+			if f := m.FieldByNum(21); f == nil || f.Value.Uint32() != uint32(Total(strength().Steps))*1000 {
 				t.Errorf("workout total time field: %v", f)
 			}
 		case typedef.MesgNumMemoGlob:
@@ -121,11 +132,61 @@ func TestEncodeWorkoutAsGarminConnect(t *testing.T) {
 	}
 }
 
-// TestEncodeLongDescription: a description over a FIT text field's 255 bytes (Garmin
-// Connect's run to about 400) is cut at a character boundary instead of failing the file.
+// TestEncodeLongDescription: as Garmin Connect writes it, a long description's field holds
+// 157 bytes and "..." (cut at a character boundary), and right after the workout message a memo
+// holds the whole text in 255-byte parts, the last padded with zeros. The reader takes the memo.
 func TestEncodeLongDescription(t *testing.T) {
-	desc := strings.Repeat("a", 253) + "ü more text after the limit"
-	b, err := EncodeWorkout(strength(), desc, EncodeOptions{Serial: 1, Created: time.Now()})
+	desc := strings.Repeat("a", 156) + "ü" + strings.Repeat(" more text", 30)
+	w := strength()
+	w.Description = desc
+	b, err := EncodeWorkout(w, EncodeOptions{Serial: 1, Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fit, err := decoder.New(bytes.NewReader(b)).Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts [][]byte
+	afterWorkout := false
+	for i, m := range fit.Messages {
+		switch m.Num {
+		case typedef.MesgNumWorkout:
+			if got := mesgdef.NewWorkout(&m).WktDescription; got != strings.Repeat("a", 156)+"..." {
+				t.Fatalf("description field %q (%d bytes)", got, len(got))
+			}
+			afterWorkout = fit.Messages[i+1].Num == typedef.MesgNumMemoGlob
+		case typedef.MesgNumMemoGlob:
+			g := mesgdef.NewMemoGlob(&m)
+			if g.MesgNum == typedef.MesgNumWorkout && g.FieldNum == 17 {
+				if int(g.PartIndex) != len(parts) || len(g.Data) != 255 {
+					t.Fatalf("part %d of %d bytes", g.PartIndex, len(g.Data))
+				}
+				parts = append(parts, g.Data)
+			}
+		}
+	}
+	if !afterWorkout || len(parts) != 2 || parts[1][len(parts[1])-1] != 0 {
+		t.Fatalf("%d parts, right after the workout %v", len(parts), afterWorkout)
+	}
+	f, err := Decode(b)
+	if err != nil || f.Workout.Description != desc {
+		t.Fatalf("read back %q, %v", f.Workout.Description, err)
+	}
+	// A short one: the field and a single memo with its zero.
+	w.Description = "Short"
+	b, _ = EncodeWorkout(w, EncodeOptions{Serial: 1, Created: time.Now()})
+	if f, _ := Decode(b); f.Workout.Description != "Short" {
+		t.Fatalf("short description %q", f.Workout.Description)
+	}
+}
+
+// TestEncodeRepeatAsGarminConnect: a repeat step carries its first step, count and field 18 =
+// 0, and nothing else; notes over 254 bytes come back whole from their memo parts.
+func TestEncodeRepeatAsGarminConnect(t *testing.T) {
+	w := strength()
+	w.Steps[0].Notes = strings.Repeat("ä", 200) // 400 bytes
+	b, err := EncodeWorkout(w, EncodeOptions{Serial: 1, Created: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,14 +195,52 @@ func TestEncodeLongDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range fit.Messages {
-		if m.Num == typedef.MesgNumWorkout {
-			if got := mesgdef.NewWorkout(&m).WktDescription; got != strings.Repeat("a", 253) {
-				t.Fatalf("description %q (%d bytes)", got, len(got))
+		if m.Num != typedef.MesgNumWorkoutStep {
+			continue
+		}
+		s := mesgdef.NewWorkoutStep(&m)
+		if s.DurationType != typedef.WktStepDurationRepeatUntilStepsCmplt {
+			continue
+		}
+		var valid []byte
+		for _, f := range m.Fields {
+			if f.Value.Valid(f.BaseType) {
+				valid = append(valid, f.Num)
 			}
-			return
+		}
+		if !slices.Equal(valid, []byte{254, 1, 2, 4, 18}) && !slices.Equal(valid, []byte{1, 2, 4, 254, 18}) {
+			slices.Sort(valid)
+			if !slices.Equal(valid, []byte{1, 2, 4, 18, 254}) {
+				t.Fatalf("repeat step fields %v", valid)
+			}
+		}
+		if f := m.FieldByNum(18); f == nil || f.Value.Uint8() != 0 {
+			t.Fatalf("field 18 %v", f)
 		}
 	}
-	t.Fatal("no workout message")
+	f, err := Decode(b)
+	if err != nil || f.Workout.Steps[0].Notes != w.Steps[0].Notes {
+		t.Fatalf("notes read back %d runes, %v", len([]rune(f.Workout.Steps[0].Notes)), err)
+	}
+}
+
+// TestEncodeKeepsExtra: an original's unnamed workout fields are written back as read; only
+// the totals Extra lacks are computed.
+func TestEncodeKeepsExtra(t *testing.T) {
+	one, zero, total, z32 := uint8(1), uint8(0), uint32(540000), uint32(0)
+	w := strength()
+	w.Extra = &WorkoutExtra{F9: &one, F10: &z32, F16: append(make([]byte, 15), 1), F21: &total, F22: &z32, F23: &zero, F24: &zero}
+	b, err := EncodeWorkout(w, EncodeOptions{Serial: 1, Created: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Decode(b)
+	if err == nil { // what the file says besides: Garmin Connect's software, the titles' order
+		w.Extra.Software, w.Extra.Titles = f.Workout.Extra.Software, f.Workout.Extra.Titles
+	}
+	if err != nil || !reflect.DeepEqual(f.Workout.Extra, w.Extra) || f.Workout.EstimatedS != 540 || *w.Extra.Software != garminConnectSoftware {
+		t.Fatalf("read back %+v (estimated %d), %v", f.Workout.Extra, f.Workout.EstimatedS, err)
+	}
 }
 
 func TestValidateWorkout(t *testing.T) {
@@ -164,7 +263,7 @@ func TestValidateWorkout(t *testing.T) {
 		w := ok
 		w.Steps = append([]Step(nil), ok.Steps...)
 		change(&w)
-		if _, err := EncodeWorkout(w, "", EncodeOptions{Serial: 1, Created: time.Now()}); !errors.Is(err, ErrInvalidWorkout) {
+		if _, err := EncodeWorkout(w, EncodeOptions{Serial: 1, Created: time.Now()}); !errors.Is(err, ErrInvalidWorkout) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -226,7 +325,7 @@ func TestEncodeLikeCapturedPushes(t *testing.T) {
 			continue
 		}
 		n++
-		again, err := EncodeWorkout(*f.Workout, "", EncodeOptions{Serial: 7, Created: f.Created})
+		again, err := EncodeWorkout(*f.Workout, EncodeOptions{Serial: 7, Created: f.Created})
 		if err != nil {
 			t.Errorf("%s (%s): %v", filepath.Base(path), f.Workout.Name, err)
 			continue
@@ -240,4 +339,51 @@ func TestEncodeLikeCapturedPushes(t *testing.T) {
 		}
 	}
 	t.Logf("%d captured workouts written again", n)
+}
+
+// TestEncodeLikeGarminFiles is opt-in: GOARMIN_WORKOUT_DIR names a folder of workout files
+// Garmin Connect wrote (product 65534 in their file_id; the watch's own built-in workouts are
+// left out). Each one read and written again says exactly the same, message by message, its
+// identity aside (Compare).
+func TestEncodeLikeGarminFiles(t *testing.T) {
+	dir := os.Getenv("GOARMIN_WORKOUT_DIR")
+	if dir == "" {
+		t.Skip("set GOARMIN_WORKOUT_DIR to a folder of Garmin Connect's workout files")
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*"))
+	n := 0
+	for _, path := range files {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fit, err := decoder.New(bytes.NewReader(b)).Decode()
+		if err != nil || len(fit.Messages) == 0 || fit.Messages[0].Num != typedef.MesgNumFileId {
+			continue
+		}
+		if id := mesgdef.NewFileId(&fit.Messages[0]); id.Type != typedef.FileWorkout || id.Product != ConnectProduct {
+			continue
+		}
+		f, err := Decode(b)
+		if err != nil {
+			t.Fatalf("%s: %v", filepath.Base(path), err)
+		}
+		n++
+		again, err := EncodeWorkout(*f.Workout, EncodeOptions{Serial: 7, Created: f.Created})
+		if err != nil {
+			t.Errorf("%s (%s): %v", filepath.Base(path), f.Workout.Name, err)
+			continue
+		}
+		diff, err := Compare(b, again)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(diff) > 0 {
+			if len(diff) > 8 {
+				diff = append(diff[:8], fmt.Sprintf("… %d more", len(diff)-8))
+			}
+			t.Errorf("%s (%s) written again differs:\n  %s", filepath.Base(path), f.Workout.Name, strings.Join(diff, "\n  "))
+		}
+	}
+	t.Logf("%d Garmin Connect workout files written again", n)
 }

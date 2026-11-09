@@ -29,8 +29,9 @@ const (
 	// nightly HRV; 5: timestamp_16 from the last monitoring record; 6: the watch's own time in
 	// zones, its settings, sport profiles, goals, lifetime totals, workouts and courses; 7: sleep
 	// stages read as the end of each interval, nights merged from parts, naps; 8: the workout an
-	// activity followed.
-	Version = 8
+	// activity followed; 9: workouts whole, as their files say (descriptions and notes from
+	// their memos, the stated total, the fields the profile does not name).
+	Version = 9
 )
 
 // fitTypeActivity is FIT file type 4: its sessions become activities; an activity summary (20)

@@ -26,6 +26,8 @@ export interface PageDef {
   detail?: () => Promise<{ default: ComponentType }>
   /** Routed but not in the tab strip (reached from a button: Add a watch). */
   hidden?: boolean
+  /** More pages under it (`path/<extra.path>`, e.g. new, :id/edit), before the detail page. */
+  extra?: { path: string; load: () => Promise<{ default: ComponentType }> }[]
 }
 
 export interface SectionDef {
@@ -75,9 +77,13 @@ export const sections: SectionDef[] = [
       },
       { path: 'performance', label: 'Performance', periods: ['all', 'week', 'month', 'year'], defaultPeriod: 'month', load: () => import('../pages/training/Performance') },
       { path: 'coach', label: 'Coach', periods: ['week'], load: () => import('../pages/training/Coach') },
-      { path: 'workouts', label: 'Workouts', load: () => import('../pages/training/Workouts'), detail: () => import('../pages/training/Workout') },
-      { path: 'workouts/new', label: 'New workout', hidden: true, load: () => import('../pages/training/WorkoutEditor') },
-      { path: 'workouts/:id/edit', label: 'Edit workout', hidden: true, load: () => import('../pages/training/WorkoutEditor') },
+      {
+        path: 'workouts', label: 'Workouts', load: () => import('../pages/training/Workouts'), detail: () => import('../pages/training/Workout'),
+        extra: [
+          { path: 'new', load: () => import('../pages/training/editor/WorkoutEditor') },
+          { path: ':id/edit', load: () => import('../pages/training/editor/WorkoutEditor') },
+        ],
+      },
       { path: 'exercises', label: 'Exercises', load: () => import('../pages/training/Exercises') },
       { path: 'courses', label: 'Courses', load: () => import('../pages/training/Courses'), detail: () => import('../pages/training/Course') },
       { path: 'records', label: 'Records', load: () => import('../pages/training/Records') },

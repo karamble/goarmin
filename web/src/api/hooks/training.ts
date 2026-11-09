@@ -5,7 +5,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, request } from '../client'
 import { keys } from '../keys'
-import type { Activity, ActivityDetail, ActivityPage, Course, Neighbours, Streams, Totals, WatchProfile, Workout, WorkoutBody, WorkoutSport, ZonesInfo } from '../types'
+import type { Activity, ActivityDetail, ActivityPage, Course, Neighbours, Streams, Totals, WatchProfile, Workout, WorkoutStep, ZonesInfo } from '../types'
 
 /** useActivityPages pages through every activity, newest first (Load more). */
 export function useActivityPages(limit = 30) {
@@ -88,23 +88,41 @@ export function useWorkout(id: number) {
   return useQuery({ queryKey: keys.workout(id), queryFn: () => nullOn404(request<Workout>('GET', `/workouts/${id}`)), enabled: id > 0 })
 }
 
-/** useWorkoutSports are the sports a workout made in goarmin can have. */
-export function useWorkoutSports() {
-  return useQuery({ queryKey: ['training', 'workout-sports'], queryFn: () => request<WorkoutSport[]>('GET', '/workout-sports'), staleTime: Infinity })
+/** A workout as the builder sends it. */
+export interface WorkoutBody {
+  name: string
+  sport: string
+  sub_sport: string
+  description: string
+  steps: WorkoutStep[]
 }
 
-/** useSaveWorkout makes a workout (no id) or saves an edited one; it refreshes the library. */
-export function useSaveWorkout() {
+/** useWorkoutBuilder makes, saves (If-Match with the version edited), duplicates and hides
+ * workouts; each refreshes the library, the calendar and the devices. */
+export function useWorkoutBuilder() {
   const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, body }: { id?: number; body: WorkoutBody }) =>
-      id ? request<Workout>('PUT', `/workouts/${id}`, body) : request<Workout>('POST', '/workouts', body),
-    onSuccess: (w) => {
-      qc.setQueryData(keys.workout(w.id), w)
-      void qc.invalidateQueries({ queryKey: keys.workouts })
-      void qc.invalidateQueries({ queryKey: keys.calendarAll })
-    },
-  })
+  const done = (w?: Workout) => {
+    if (w) qc.setQueryData(keys.workout(w.id), w)
+    void qc.invalidateQueries({ queryKey: keys.workouts })
+    void qc.invalidateQueries({ queryKey: keys.calendarAll })
+    void qc.invalidateQueries({ queryKey: keys.devices })
+  }
+  return {
+    create: useMutation({ mutationFn: (b: WorkoutBody) => request<Workout>('POST', '/workouts', b), onSuccess: done }),
+    save: useMutation({
+      mutationFn: ({ id, tag, body }: { id: number; tag?: string; body: WorkoutBody }) =>
+        request<Workout>('PUT', `/workouts/${id}`, body, { headers: tag ? { 'If-Match': tag } : {} }),
+      onSuccess: done,
+    }),
+    duplicate: useMutation({
+      mutationFn: ({ id, name }: { id: number; name?: string }) => request<Workout>('POST', `/workouts/${id}/duplicate`, name ? { name } : undefined),
+      onSuccess: done,
+    }),
+    hide: useMutation({
+      mutationFn: ({ id, hide }: { id: number; hide: boolean }) => request<Workout>(hide ? 'POST' : 'DELETE', `/workouts/${id}/hide`),
+      onSuccess: done,
+    }),
+  }
 }
 
 /** useWorkoutEdits renames a workout or changes its description (goarmin keeps its own

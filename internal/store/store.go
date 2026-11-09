@@ -458,6 +458,7 @@ type SyncRun struct {
 	OK                                  bool
 	Listed, Failed                      int
 	Pulled, Archived, Deleted, Imported int
+	Sent                                int // files pushed to the watch
 	Bytes                               int64
 	Error, ErrorCode                    string
 }
@@ -477,9 +478,9 @@ func (s *Store) RecordSyncRun(ctx context.Context, r SyncRun) error {
 		r.StartedBy = StartedBySchedule
 	}
 	_, err := s.db.W.ExecContext(ctx, `INSERT INTO sync_runs (device_id, owner_id, started_by, started_at, finished_at, ok,
-		listed, failed, pulled, archived, deleted, bytes, imported, error, error_code)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.DeviceID, nullIf0(r.OwnerID), r.StartedBy, r.Started.Unix(),
-		r.Finished.Unix(), r.OK, r.Listed, r.Failed, r.Pulled, r.Archived, r.Deleted, r.Bytes, r.Imported,
+		listed, failed, pulled, archived, deleted, bytes, imported, sent, error, error_code)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.DeviceID, nullIf0(r.OwnerID), r.StartedBy, r.Started.Unix(),
+		r.Finished.Unix(), r.OK, r.Listed, r.Failed, r.Pulled, r.Archived, r.Deleted, r.Bytes, r.Imported, r.Sent,
 		truncate(r.Error, 500), r.ErrorCode)
 	return err
 }
@@ -524,7 +525,7 @@ func (s *Store) RecentSyncRuns(ctx context.Context, device int64, limit int) ([]
 }
 
 const syncRunCols = `r.id, r.device_id, COALESCE(r.owner_id, 0), r.started_by, r.started_at, r.finished_at, r.ok,
-	r.listed, r.failed, r.pulled, r.archived, r.deleted, r.bytes, r.imported, r.error, r.error_code`
+	r.listed, r.failed, r.pulled, r.archived, r.deleted, r.bytes, r.imported, r.sent, r.error, r.error_code`
 
 func (s *Store) querySyncRuns(ctx context.Context, q string, args ...any) ([]SyncRun, error) {
 	rows, err := s.db.R.QueryContext(ctx, q, args...)
@@ -537,7 +538,7 @@ func (s *Store) querySyncRuns(ctx context.Context, q string, args ...any) ([]Syn
 		var r SyncRun
 		var st, fin int64
 		if err := rows.Scan(&r.ID, &r.DeviceID, &r.OwnerID, &r.StartedBy, &st, &fin, &r.OK, &r.Listed, &r.Failed, &r.Pulled,
-			&r.Archived, &r.Deleted, &r.Bytes, &r.Imported, &r.Error, &r.ErrorCode); err != nil {
+			&r.Archived, &r.Deleted, &r.Bytes, &r.Imported, &r.Sent, &r.Error, &r.ErrorCode); err != nil {
 			return nil, err
 		}
 		r.Started, r.Finished = time.Unix(st, 0), time.Unix(fin, 0)

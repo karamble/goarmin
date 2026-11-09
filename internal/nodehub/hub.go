@@ -743,6 +743,7 @@ func (h *Hub) sync(ctx context.Context, req Request, rec syncnode.WatchRecord) (
 			}
 		}
 		h.log.Info("nodehub: sent to the watch", "watch", addr, "files", ok, "of", len(sopt.Send))
+		run.Sent = ok
 		if serr := ob.Sent(ctx, w, res.Sent, time.Now()); serr != nil {
 			h.log.Warn("nodehub: recording what was sent to the watch", "watch", addr, "err", serr)
 		}

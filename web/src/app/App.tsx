@@ -62,6 +62,9 @@ function sectionRoutes(s: SectionDef) {
       {s.pages.map((p) => (
         <Route key={p.path} path={p.path} element={<Page load={p.load} />} />
       ))}
+      {s.pages.flatMap((p) => (p.extra ?? []).map((x) => (
+        <Route key={`${p.path}/${x.path}`} path={`${p.path}/${x.path}`} element={<Page load={x.load} />} />
+      )))}
       {s.pages.filter((p) => p.detail).map((p) => (
         <Route key={p.path + '/:id'} path={`${p.path}/:id`} element={<Page load={p.detail!} />} />
       ))}

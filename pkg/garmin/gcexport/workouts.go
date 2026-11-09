@@ -15,9 +15,8 @@ import (
 // Workout is one of the account's Garmin Connect workouts, in the form a watch's workout file
 // reads as (fitwatch.Workout), with Connect's own fields.
 type Workout struct {
-	fitwatch.Workout
+	fitwatch.Workout       // its description included
 	ID               int64 // Garmin Connect's workoutId
-	Description      string
 	Created, Updated time.Time
 }
 
@@ -66,7 +65,7 @@ func connectWorkout(m obj) (Workout, bool) {
 	if !ok {
 		sp = [2]string{key, "generic"}
 	}
-	out := Workout{Workout: fitwatch.Workout{Name: name, Sport: sp[0], SubSport: sp[1]}, Description: strings.TrimSpace(m.str("description"))}
+	out := Workout{Workout: fitwatch.Workout{Name: name, Sport: sp[0], SubSport: sp[1], Description: strings.TrimSpace(m.str("description"))}}
 	if id := m.num("workoutId"); !math.IsNaN(id) {
 		out.ID = int64(id)
 	}

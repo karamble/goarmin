@@ -5,12 +5,14 @@
 import { Plus, Search, Watch } from 'lucide-react'
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useWorkouts } from '../../api/hooks/training'
+import { useWorkoutEdits, useWorkouts } from '../../api/hooks/training'
+import { HeaderActions } from '../../app/section/HeaderSlot'
+import { Switch } from '../../ui/kit'
+import { useToast } from '../../ui/Toast'
 import type { Workout, WorkoutOrigin, WorkoutWatch } from '../../api/types'
 import { sportIcon } from '../../glance/cards/sport'
 import { ago, hm } from '../../lib/format'
 import { filterLibrary, originText, originWords, presenceText, sportKey, watchShares, type LibraryFilter } from '../../lib/workoutLibrary'
-import { HeaderActions } from '../../app/section/HeaderSlot'
 import { Loaded } from '../health/parts'
 
 export { sportWords } from '../../lib/workoutLibrary'
@@ -39,20 +41,20 @@ export default function Workouts() {
   const all = useMemo(() => q.data ?? [], [q.data])
   const shown = useMemo(() => filterLibrary(all, f), [all, f])
   return (
-    <>
-    <HeaderActions>
-      <Link to="/training/workouts/new" className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-lime hover:border-lime">
-        <Plus size={14} aria-hidden /> New workout
-      </Link>
-    </HeaderActions>
     <Loaded q={[q]}>
-      {() => all.length === 0 ? (
+      {() => (<>
+      <HeaderActions>
+        <Link to="/training/workouts/new"
+          className="inline-flex h-9 items-center gap-1.5 rounded-full border-2 border-lime bg-lime px-4 text-[13px] font-bold text-bg">
+          <Plus size={15} aria-hidden /> New workout
+        </Link>
+      </HeaderActions>
+      {all.length === 0 ? (
         <section className="card grid place-items-center px-6 py-12 text-center">
           <p className="m-0 font-display text-[22px] uppercase">No workouts yet</p>
           <p className="m-0 mt-2 max-w-[520px] text-[14px] text-muted">
-            Workouts on your watch (sent from Garmin Connect, or made on the watch) arrive with the next sync. The workouts of your
+            Build one with New workout. Workouts on your watch (sent from Garmin Connect, or made on the watch) arrive with the next sync. The workouts of your
             Garmin Connect account come with its export, under <Link to="/devices/import" className="text-lime hover:underline">Devices › Import</Link>.
-            Or <Link to="/training/workouts/new" className="text-lime hover:underline">make one here</Link>.
           </p>
         </section>
       ) : (
@@ -71,8 +73,8 @@ export default function Workouts() {
           )}
         </div>
       )}
+      </>)}
     </Loaded>
-    </>
   )
 }
 
@@ -151,9 +153,11 @@ function Filters({ all, f, set }: { all: Workout[]; f: LibraryFilter; set: (k: k
 function WorkoutCard({ w }: { w: Workout }) {
   const Icon = sportIcon(w.sport)
   const meta = [sportKey(w), `${w.step_count} steps`, w.estimated_s ? `about ${hm(w.estimated_s)}` : '', w.exercise_count ? `${w.exercise_count} exercises` : '']
+  const { onWatch } = useWorkoutEdits()
+  const toast = useToast()
   return (
-    <li className="min-w-0">
-      <Link to={`/training/workouts/${w.id}`} className="card card-hover group flex h-full min-w-0 items-start gap-4 p-5">
+    <li className="card card-hover group flex min-w-0 flex-col">
+      <Link to={`/training/workouts/${w.id}`} className="flex min-w-0 flex-1 items-start gap-4 p-5 pb-3">
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border text-muted group-hover:border-lime-dim group-hover:text-lime">
           <Icon size={18} strokeWidth={1.75} aria-hidden />
         </span>
@@ -166,6 +170,20 @@ function WorkoutCard({ w }: { w: Workout }) {
           </span>
         </span>
       </Link>
+      {w.watches.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-border px-5 py-3">
+          {w.watches.map((x) => (
+            <span key={x.device_id} className="inline-flex items-center gap-2 text-[13px] text-muted">
+              <Switch on={x.want} label={`${w.name} on ${x.name}`} disabled={onWatch.isPending}
+                onChange={(on) => onWatch.mutate({ id: w.id, device: x.device_id, on }, {
+                  onSuccess: () => toast({ text: on ? `${w.name} goes on ${x.name} at its next sync` : `${w.name} switched off: delete it on ${x.name}` }),
+                  onError: (e) => toast({ text: `Not changed: ${(e as Error).message}`, tone: 'error' }),
+                })} />
+              {w.watches.length > 1 ? x.name : 'On the watch'}
+            </span>
+          ))}
+        </div>
+      )}
     </li>
   )
 }

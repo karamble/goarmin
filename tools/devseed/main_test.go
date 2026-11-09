@@ -96,20 +96,20 @@ func TestSeed(t *testing.T) {
 	wk, _ := st.Workouts(ctx, u.ID, 0)
 	cs, _ := st.Courses(ctx, u.ID, 0)
 	tot, _ := st.LifetimeTotals(ctx, u.ID)
-	if len(wk) != 6 || len(cs) != 1 || len(tot) != 2 || wk[0].EstimatedS == 0 {
+	if len(wk) != 8 || len(cs) != 1 || len(tot) != 2 || wk[0].EstimatedS == 0 {
 		t.Fatalf("%d workouts, %d courses, %d totals", len(wk), len(cs), len(tot))
 	}
 	// The library: Core 20 from the watch and Garmin Connect is one workout; on the made-up
-	// watch two are on it, one was removed there, two never were.
+	// watch two are on it, one was removed there, two never were, nor the two built in goarmin.
 	lib, err := st.WorkoutLibrary(ctx, u.ID)
-	if err != nil || len(lib.Workouts) != 5 || len(lib.Watches) != 1 || lib.Watches[0].InventoryAt.IsZero() {
+	if err != nil || len(lib.Workouts) != 7 || len(lib.Watches) != 1 || lib.Watches[0].InventoryAt.IsZero() {
 		t.Fatalf("library %d workouts, %d watches, %v", len(lib.Workouts), len(lib.Watches), err)
 	}
 	states := map[string]int{}
 	for _, w := range lib.Workouts {
 		states[w.Watches[0].State]++
 	}
-	if states[store.PresenceOn] != 2 || states[store.PresenceRemoved] != 1 || states[store.PresenceAbsent] != 2 {
+	if states[store.PresenceOn] != 2 || states[store.PresenceRemoved] != 1 || states[store.PresenceAbsent] != 4 {
 		t.Fatalf("where the workouts are: %v", states)
 	}
 	if plans, err := st.Plans(ctx, u.ID, now.AddDate(0, 0, -10).Format(time.DateOnly), now.AddDate(0, 0, 10).Format(time.DateOnly)); err != nil || len(plans) != 6 {

@@ -11,8 +11,10 @@ package fitwatch
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/muktihari/fit/profile/basetype"
 	"github.com/muktihari/fit/profile/mesgdef"
 	"github.com/muktihari/fit/profile/typedef"
+	"github.com/muktihari/fit/proto"
 
 	"github.com/karamble/goarmin/pkg/fitactivity"
 	"github.com/karamble/goarmin/pkg/geo"
@@ -167,11 +170,43 @@ type Step struct {
 
 // Workout is a saved workout.
 type Workout struct {
-	Name       string `json:"name"`
-	Sport      string `json:"sport"`
-	SubSport   string `json:"sub_sport"`
-	Steps      []Step `json:"steps"`
-	EstimatedS int    `json:"estimated_s"` // timed steps with their repeats; 0 if none are timed
+	Name     string `json:"name"`
+	Sport    string `json:"sport"`
+	SubSport string `json:"sub_sport"`
+	// Description is the workout's text, whole (a file keeps it in a memo).
+	Description string `json:"description,omitempty"`
+	Steps       []Step `json:"steps"`
+	// EstimatedS is the time the workout says it takes: the file's own total where it has one
+	// (Garmin's library states round figures), else the timed steps with their repeats (0 if
+	// none are timed).
+	EstimatedS int `json:"estimated_s"`
+	// Extra is what the file's workout message held beyond the FIT profile, kept so the
+	// workout written again matches its file (nil for a workout made in goarmin).
+	Extra *WorkoutExtra `json:"extra,omitempty"`
+}
+
+// WorkoutExtra is a workout message's fields the FIT profile does not name, as read. Garmin
+// Connect writes, for a workout a user saved, 9=0, 10 and 21 = the total time in ms, 23=0 and
+// 16 zero bytes; its own library content ends field 16 in 1, and some of it adds 9=1, 22=0 and
+// 24=0. A nil field was not there.
+type WorkoutExtra struct {
+	// Software is the file_creator's software version (Garmin Connect: 2621, older 2517).
+	Software *uint16 `json:"software,omitempty"`
+	// Titles is the order the file listed its exercise titles in (Garmin Connect's follows
+	// nothing in the workout), as "category number" pairs.
+	Titles [][2]uint16 `json:"titles,omitempty"`
+	// NoDescriptionMemo and NoSecondary mark an older writer's file (Garmin's own content
+	// from 2023): a description without its memo, steps without a secondary target value.
+	NoDescriptionMemo bool    `json:"no_description_memo,omitempty"`
+	NoSecondary       bool    `json:"no_secondary,omitempty"`
+	NoTitles          bool    `json:"no_titles,omitempty"` // exercises without exercise_title messages
+	F9                *uint8  `json:"f9,omitempty"`
+	F10               *uint32 `json:"f10,omitempty"`
+	F16               []byte  `json:"f16,omitempty"`
+	F21               *uint32 `json:"f21,omitempty"`
+	F22               *uint32 `json:"f22,omitempty"`
+	F23               *uint8  `json:"f23,omitempty"`
+	F24               *uint8  `json:"f24,omitempty"`
 }
 
 // CoursePoint is a named point along a course.
@@ -218,6 +253,9 @@ func Decode(b []byte) (*File, error) {
 		zt        []*mesgdef.ZonesTarget
 		hz        []*mesgdef.HrZone
 		titles    = map[[2]uint16]string{}
+		order     [][2]uint16
+		software  *uint16
+		memos     = map[memoKey][]memoPart{}
 		steps     []*mesgdef.WorkoutStep
 		cpoints   []*mesgdef.CoursePoint
 		laps      []*mesgdef.Lap
@@ -268,10 +306,22 @@ func Decode(b []byte) (*File, error) {
 				workout = mesgdef.NewWorkout(m)
 			case typedef.MesgNumWorkoutStep:
 				steps = append(steps, mesgdef.NewWorkoutStep(m))
+			case typedef.MesgNumFileCreator:
+				if c := mesgdef.NewFileCreator(m); c.SoftwareVersion != basetype.Uint16Invalid {
+					v := c.SoftwareVersion
+					software = &v
+				}
+				f.read(m, docTypes[f.Type], readHere)
+			case typedef.MesgNumMemoGlob:
+				g := mesgdef.NewMemoGlob(m)
+				k := memoKey{g.MesgNum, uint16(g.ParentIndex), g.FieldNum}
+				memos[k] = append(memos[k], memoPart{g.PartIndex, g.Data})
 			case typedef.MesgNumExerciseTitle:
 				t := mesgdef.NewExerciseTitle(m)
 				if name := first(t.WktStepName); name != "" {
-					titles[[2]uint16{uint16(t.ExerciseCategory), t.ExerciseName}] = name
+					k := [2]uint16{uint16(t.ExerciseCategory), t.ExerciseName}
+					titles[k] = name
+					order = append(order, k)
 				}
 			case typedef.MesgNumCourse:
 				course = mesgdef.NewCourse(m)
@@ -300,7 +350,11 @@ func Decode(b []byte) (*File, error) {
 		}
 		f.Sport = p
 	case typedef.FileWorkout:
-		f.Workout = workoutOf(workout, steps, titles)
+		f.Workout = workoutOf(workout, steps, titles, memos)
+		if x := f.Workout.Extra; x != nil {
+			x.Software, x.Titles = software, order
+			x.NoTitles = len(order) == 0 && slices.ContainsFunc(f.Workout.Steps, func(s Step) bool { return s.Exercise != nil })
+		}
 	case typedef.FileCourse:
 		f.Course = courseOf(course, track, laps, cpoints)
 	case FileDeviceData:
@@ -503,17 +557,58 @@ func totals(t *mesgdef.Totals) (Totals, bool) {
 		DistanceM: float64(max(0, v(t.Distance))), Calories: max(0, v(t.Calories)), Sessions: int(t.Sessions)}, true
 }
 
-func workoutOf(w *mesgdef.Workout, steps []*mesgdef.WorkoutStep, titles map[[2]uint16]string) *Workout {
+// memoKey names the field a memo_glob holds the whole text of: the message, its index and the
+// field number.
+type memoKey struct {
+	mesg   typedef.MesgNum
+	parent uint16
+	field  uint8
+}
+
+type memoPart struct {
+	index uint32
+	data  []uint8
+}
+
+// memoText joins a memo's parts in order, up to its terminating zero.
+func memoText(parts []memoPart) string {
+	slices.SortStableFunc(parts, func(a, b memoPart) int { return cmp.Compare(a.index, b.index) })
+	var b []byte
+	for _, p := range parts {
+		b = append(b, p.data...)
+	}
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		b = b[:i]
+	}
+	return string(b) // as written: a file written again must say the same
+}
+
+func workoutOf(w *mesgdef.Workout, steps []*mesgdef.WorkoutStep, titles map[[2]uint16]string, memos map[memoKey][]memoPart) *Workout {
 	out := &Workout{}
 	if w != nil {
 		out.Name, out.Sport, out.SubSport = strings.TrimSpace(w.WktName), word(w.Sport.String()), word(w.SubSport.String())
+		out.Description = w.WktDescription
+		m, memo := memos[memoKey{typedef.MesgNumWorkout, 0, 17}]
+		if t := memoText(m); memo && t != "" {
+			out.Description = t // the field holds 160 bytes; the memo the whole text
+		}
+		out.Extra = workoutExtra(w.UnknownFields)
+		if out.Extra != nil && out.Description != "" && !memo {
+			out.Extra.NoDescriptionMemo = true
+		}
 	}
+	secondary := false
 	for i, s := range steps {
 		idx := int(s.MessageIndex)
 		if s.MessageIndex == typedef.MessageIndexInvalid || idx >= 0xFFF {
 			idx = i
 		}
 		st := Step{Index: idx, Name: strings.TrimSpace(s.WktStepName), Notes: strings.TrimSpace(s.Notes), Intensity: word(s.Intensity.String())}
+		if m, ok := memos[memoKey{typedef.MesgNumWorkoutStep, uint16(s.MessageIndex), 8}]; ok {
+			if t := memoText(m); t != "" {
+				st.Notes = t
+			}
+		}
 		dv := s.DurationValue
 		switch s.DurationType {
 		case typedef.WktStepDurationTime, typedef.WktStepDurationRepetitionTime:
@@ -547,6 +642,7 @@ func workoutOf(w *mesgdef.Workout, steps []*mesgdef.WorkoutStep, titles map[[2]u
 		}
 		if !IsRepeat(st) {
 			target(&st, s)
+			secondary = secondary || s.SecondaryTargetValue != basetype.Uint32Invalid
 		}
 		if s.ExerciseCategory != typedef.ExerciseCategoryInvalid && s.ExerciseName != basetype.Uint16Invalid {
 			ex := &Exercise{Category: word(s.ExerciseCategory.String()), Number: int(s.ExerciseName),
@@ -564,8 +660,50 @@ func workoutOf(w *mesgdef.Workout, steps []*mesgdef.WorkoutStep, titles map[[2]u
 		}
 		out.Steps = append(out.Steps, st)
 	}
+	if out.Extra != nil && !secondary && slices.ContainsFunc(out.Steps, func(s Step) bool { return !IsRepeat(s) }) {
+		out.Extra.NoSecondary = true
+	}
 	out.EstimatedS = Estimate(out.Steps)
+	if x := out.Extra; x != nil && x.F21 != nil && *x.F21 > 0 {
+		out.EstimatedS = int(*x.F21 / 1000)
+	}
 	return out
+}
+
+// workoutExtra keeps a workout message's unnamed fields (nil if it has none of them).
+func workoutExtra(fields []proto.Field) *WorkoutExtra {
+	x := &WorkoutExtra{}
+	found := false
+	for _, f := range fields {
+		if !f.Value.Valid(f.BaseType) {
+			continue
+		}
+		u8 := func() *uint8 { v := f.Value.Uint8(); return &v }
+		u32 := func() *uint32 { v := f.Value.Uint32(); return &v }
+		switch f.Num {
+		case 9:
+			x.F9 = u8()
+		case 10:
+			x.F10 = u32()
+		case 16:
+			x.F16 = append([]byte(nil), f.Value.SliceUint8()...)
+		case 21:
+			x.F21 = u32()
+		case 22:
+			x.F22 = u32()
+		case 23:
+			x.F23 = u8()
+		case 24:
+			x.F24 = u8()
+		default:
+			continue
+		}
+		found = true
+	}
+	if !found {
+		return nil
+	}
+	return x
 }
 
 // IsRepeat reports whether a step repeats the steps from its From up to itself: Repeat times in
@@ -659,6 +797,39 @@ func Estimate(steps []Step) int {
 		}
 	}
 	return int(math.Round(total))
+}
+
+// RepSeconds is how long goarmin reckons one repetition takes, for a workout's total.
+const RepSeconds = 3
+
+// Total is the time a workout built in goarmin says it takes, as its file states it: the timed
+// steps with their repeats (Estimate), and RepSeconds per repetition. Garmin's own workouts
+// state round figures of their own, which a file keeps (Workout.Extra).
+func Total(steps []Step) int {
+	t := Estimate(steps)
+	pos := map[int]int{}
+	for i, s := range steps {
+		pos[s.Index] = i
+	}
+	runs := make([]int, len(steps))
+	for i := range runs {
+		runs[i] = 1
+	}
+	for i, s := range steps {
+		if s.Duration == "repeat" && s.Repeat > 1 {
+			if from, ok := pos[s.From]; ok && from < i {
+				for j := from; j < i; j++ {
+					runs[j] *= s.Repeat
+				}
+			}
+		}
+	}
+	for i, s := range steps {
+		if s.Duration == "reps" {
+			t += int(math.Round(s.DurationValue)) * RepSeconds * runs[i]
+		}
+	}
+	return t
 }
 
 func courseOf(c *mesgdef.Course, track fitactivity.Track, laps []*mesgdef.Lap, points []*mesgdef.CoursePoint) *Course {

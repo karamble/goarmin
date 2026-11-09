@@ -61,6 +61,7 @@ export function RunRow({ entry, watch, tz }: { entry: LogEntry; watch?: string; 
             <>
               <span title="files the watch listed → fetched → new in goarmin">{r.listed} → {r.pulled} → {r.imported}</span>
               {(r.archived > 0 || r.deleted > 0) && <span title="marked as synced · deleted on the watch">{r.archived} · {r.deleted}</span>}
+              {(r.sent ?? 0) > 0 && <span title="workouts sent to the watch" className="text-lime">sent {r.sent}</span>}
               {r.bytes > 0 && <span>{bytes(r.bytes)}</span>}
               <span className="text-faint">{Math.max(0, r.finished_at - r.started_at)} s</span>
             </>

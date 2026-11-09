@@ -2,16 +2,16 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { CalendarPlus, MoreHorizontal, Pencil, PersonStanding, Repeat, Undo2 } from 'lucide-react'
+import { CalendarPlus, Copy, MoreHorizontal, PencilLine, PersonStanding, Repeat, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
-import { useWorkout, useWorkoutEdits } from '../../api/hooks/training'
+import { useWorkout, useWorkoutBuilder, useWorkoutEdits } from '../../api/hooks/training'
 import type { Workout, WorkoutStep, WorkoutWatch } from '../../api/types'
 import { usePlanActions } from '../../api/hooks/calendar'
 import { HeaderActions, useSectionTitle } from '../../app/section/HeaderSlot'
 import { useToday } from '../../app/section/usePeriod'
-import { Confirm, Sheet } from '../../ui/Sheet'
+import { Sheet } from '../../ui/Sheet'
 import { Menu } from '../../ui/Menu'
 import { Switch } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
@@ -30,9 +30,9 @@ export default function WorkoutPage() {
   const [figure, setFigure] = useState<number | null>(null)
   const [planning, setPlanning] = useState(false)
   const [renaming, setRenaming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const navigate = useNavigate()
   const { undo } = useWorkoutEdits()
+  const { duplicate, hide } = useWorkoutBuilder()
+  const navigate = useNavigate()
   const toast = useToast()
   useSectionTitle(q.data?.name)
   if (!(id > 0)) return <NotFound />
@@ -54,29 +54,32 @@ export default function WorkoutPage() {
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
             <HeaderActions>
               <Link to={`/training/workouts/${w.id}/edit`}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-muted hover:border-lime hover:text-text">
-                <Pencil size={14} aria-hidden /> Edit
+                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-text hover:border-lime">
+                <PencilLine size={14} aria-hidden /> Edit
               </Link>
+              <button type="button" disabled={duplicate.isPending}
+                onClick={() => duplicate.mutate({ id: w.id }, {
+                  onSuccess: (c) => { toast({ text: `${c.name} made` }); navigate(`/training/workouts/${c.id}/edit`) },
+                  onError: (e) => toast({ text: `Not duplicated: ${(e as Error).message}`, tone: 'error' }),
+                })}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-muted hover:border-lime hover:text-text disabled:opacity-50">
+                <Copy size={14} aria-hidden /> Duplicate
+              </button>
               <button type="button" onClick={() => setPlanning(true)}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-lime hover:border-lime">
                 <CalendarPlus size={14} aria-hidden /> Plan
               </button>
-              <Menu label={`More for ${w.name}`} icon={<MoreHorizontal size={16} />} items={[
+              <Menu label="More for this workout" icon={<MoreHorizontal size={16} />} items={[
                 { label: 'Rename', run: () => setRenaming(true) },
-                { label: 'Duplicate and edit', run: () => navigate(`/training/workouts/new?from=${w.id}`) },
-                { label: 'Download as a FIT file', run: () => { window.location.href = `/api/workouts/${w.id}/fit` } },
-                ...(w.made_here ? [{ label: 'Delete', run: () => setDeleting(true), danger: true }] : []),
+                { label: 'Download the FIT file', run: () => { window.location.href = `/api/workouts/${w.id}/fit` } },
+                {
+                  label: w.hidden ? 'Show in the library again' : 'Hide from the library',
+                  run: () => hide.mutate({ id: w.id, hide: !w.hidden }, {
+                    onSuccess: () => toast({ text: w.hidden ? `${w.name} is back in the library` : `${w.name} is hidden; it shows while a watch has it` }),
+                  }),
+                },
               ]} />
             </HeaderActions>
-            {deleting && (
-              <Confirm title={`Delete ${w.name}?`} confirm="Delete" danger onClose={() => setDeleting(false)}
-                onConfirm={() => undo.mutate(w.id, {
-                  onSuccess: () => { toast({ text: `${w.name} deleted` }); navigate('/training/workouts') },
-                  onError: (e) => toast({ text: `Not deleted: ${(e as Error).message}`, tone: 'error' }),
-                })}>
-                It leaves your library. A watch that has it keeps it until you delete it on the watch.
-              </Confirm>
-            )}
             {planning && <PlanOn id={w.id} name={w.name} onClose={() => setPlanning(false)} />}
             {renaming && <Rename w={w} onClose={() => setRenaming(false)} />}
             <section className="card p-5 sm:p-6">
@@ -158,12 +161,6 @@ function OnWatches({ w }: { w: Workout }) {
               <p className="m-0 text-[14px] text-text">{x.name}</p>
               <p className="m-0 text-[13px] text-muted">{watchLine(x, w.name)}</p>
               {x.failed && <p className="m-0 text-[13px] text-[#e08585]">Not sent: {x.failed}</p>}
-              {(x.old_copies ?? 0) > 0 && (
-                <p className="m-0 text-[13px] text-amber">
-                  {x.old_copies === 1 ? 'An older version is' : `${x.old_copies} older versions are`} still on the watch: delete {x.old_copies === 1 ? 'it' : 'them'} there
-                  (Workouts › the workout › Delete).
-                </p>
-              )}
             </div>
           </li>
         ))}
@@ -174,6 +171,11 @@ function OnWatches({ w }: { w: Workout }) {
 
 /** watchLine says where the workout is on one watch and what happens next. */
 export function watchLine(x: WorkoutWatch, name: string): string {
+  if (x.old_copies?.length) {
+    const old = x.old_copies[0]
+    return `The new version is on the watch; the old one is too: on the watch, open Workouts › ${old} › Delete.`
+  }
+  if (x.pending === 'send' && x.outdated) return 'An older version is on the watch; this one goes at its next sync.'
   if (x.pending === 'send') return 'Goes on the watch at its next sync.'
   if (x.pending === 'remove') return `Switched off. goarmin can't delete from a watch: on the watch, open Workouts › ${name} › Delete.`
   if (x.state === 'on') return 'On the watch.'

@@ -7,7 +7,9 @@ package store
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -123,9 +125,10 @@ type WorkoutPresence struct {
 	Pending string
 	// Failed is why the last push of it to this watch failed ("" if it did not).
 	Failed string
-	// OldCopies counts older versions of it the watch still lists: goarmin sent an edit, and
-	// the old one waits to be deleted on the watch.
-	OldCopies int
+	// Outdated says the watch holds only an older version of it; OldCopies names the older
+	// versions it holds beside the current one (they wait to be deleted on the watch).
+	Outdated  bool
+	OldCopies []string
 }
 
 // LibraryWatch is a watch the library reports on: one of the account's current watches that
@@ -143,6 +146,7 @@ type LibraryWorkout struct {
 	// runs), else the newest.
 	WorkoutRow
 	Versions []WorkoutRow      // every version, the shown one first
+	Hidden   bool              // hidden from the library (and on no watch)
 	Origins  []string          // OriginGoarmin, OriginWatch, OriginGarminConnect: where its versions came from
 	Watches  []WorkoutPresence // one per Library.Watches, in that order
 }
@@ -215,15 +219,29 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 		return k
 	}
 
-	// Which workout (by entry) each watch keeps, or kept, through the files its items are.
+	// Which workout (by entry) each watch keeps, or kept, through the files its items are, and
+	// which versions of it the items it lists now hold (by file sha; an item's name).
+	type held struct{ sha, name string }
 	type seen struct {
-		on, gone int64           // the latest listing, the latest removal (Unix; 0: none)
-		listed   map[string]bool // the items of it the watch lists now
+		on, gone int64 // the latest listing, the latest removal (Unix; 0: none)
+		items    map[string]held
 	}
 	where := map[int64]map[string]*seen{}
+	at := func(dev int64, k string) *seen {
+		if where[dev] == nil {
+			where[dev] = map[string]*seen{}
+		}
+		x := where[dev][k]
+		if x == nil {
+			x = &seen{items: map[string]held{}}
+			where[dev][k] = x
+		}
+		return x
+	}
 	if len(lib.Watches) > 0 {
-		q, err := s.db.R.QueryContext(ctx, `SELECT wi.device_id, wi.uid, wf.name, wf.sport, COALESCE(wi.listed_at, 0), COALESCE(wi.gone_at, 0)
-			FROM watch_items wi JOIN workout_files wf ON wf.raw_file_id = wi.raw_file_id
+		q, err := s.db.R.QueryContext(ctx, `SELECT wi.device_id, wi.uid, wf.name, wf.sport, COALESCE(wi.listed_at, 0), COALESCE(wi.gone_at, 0),
+				COALESCE(r.sha256, '')
+			FROM watch_items wi JOIN workout_files wf ON wf.raw_file_id = wi.raw_file_id LEFT JOIN raw_files r ON r.id = wi.raw_file_id
 			WHERE wf.user_id = ? AND wi.device_id IN (SELECT a.device_id FROM device_assignments a WHERE a.user_id = ? AND a.valid_to IS NULL)`,
 			user, user)
 		if err != nil {
@@ -231,23 +249,15 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 		}
 		for q.Next() {
 			var dev, listedAt, goneAt int64
-			var uid, name, sport string
-			if err := q.Scan(&dev, &uid, &name, &sport, &listedAt, &goneAt); err != nil {
+			var uid, name, sport, sha string
+			if err := q.Scan(&dev, &uid, &name, &sport, &listedAt, &goneAt, &sha); err != nil {
 				q.Close()
 				return lib, err
 			}
-			if where[dev] == nil {
-				where[dev] = map[string]*seen{}
-			}
-			k := entryOf(name, sport)
-			x := where[dev][k]
-			if x == nil {
-				x = &seen{listed: map[string]bool{}}
-				where[dev][k] = x
-			}
+			x := at(dev, entryOf(name, sport))
 			if goneAt == 0 {
 				x.on = max(x.on, max(listedAt, 1)) // linked by a sync, not yet listed: on it all the same
-				x.listed[uid] = true
+				x.items[uid] = held{sha, name}
 			} else {
 				x.gone = max(x.gone, goneAt)
 			}
@@ -268,23 +278,21 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 			if !x.ok || x.uid == "" || x.listed == 0 && x.gone == 0 {
 				continue
 			}
-			if where[dev] == nil {
-				where[dev] = map[string]*seen{}
-			}
-			y := where[dev][k]
-			if y == nil {
-				y = &seen{listed: map[string]bool{}}
-				where[dev][k] = y
-			}
+			y := at(dev, k)
 			if x.gone == 0 {
 				y.on = max(y.on, x.listed)
-				y.listed[x.uid] = true
+				if _, linked := y.items[x.uid]; !linked {
+					y.items[x.uid] = held{sha: x.sha}
+				}
 			} else {
 				y.gone = max(y.gone, x.gone)
 			}
 		}
 	}
-
+	hidden, err := s.hiddenWorkouts(ctx, user)
+	if err != nil {
+		return lib, err
+	}
 	groups := map[string]*LibraryWorkout{}
 	var order []string
 	for _, r := range rows {
@@ -327,13 +335,32 @@ func (s *Store) WorkoutLibrary(ctx context.Context, user int64) (Library, error)
 			case w.InventoryAt.IsZero():
 				p.State = PresenceUnknown
 			}
-			t, switched := targets[w.ID][k]
-			var listed map[string]bool
-			if x != nil {
-				listed = x.listed
+			// Is the version shown the one the watch holds? Known for a watch's file and goarmin's
+			// own; an older version alone on the watch makes it outdated, beside it an old copy.
+			if cur := g.FileSHA; x != nil && p.State == PresenceOn && cur != "" {
+				has := false
+				for _, it := range x.items {
+					has = has || it.sha == cur
+				}
+				for _, it := range x.items {
+					if has && it.sha != cur && it.sha != "" {
+						p.OldCopies = append(p.OldCopies, cmp.Or(it.name, g.Name))
+					}
+				}
+				p.Outdated = !has && len(x.items) > 0
+				slices.Sort(p.OldCopies)
 			}
-			wantOn(&p, w, t, switched, sends[w.ID][k], g.WorkoutRow, listed)
+			t, switched := targets[w.ID][k]
+			wantOn(&p, w, t, switched, sends[w.ID][k], g.FileSHA)
 			g.Watches = append(g.Watches, p)
+			if p.State == PresenceOn {
+				g.Hidden = false // a workout on a watch shows, hidden or not
+			}
+		}
+		if g.Hidden = hidden[k]; g.Hidden {
+			for _, p := range g.Watches {
+				g.Hidden = g.Hidden && p.State != PresenceOn
+			}
 		}
 		lib.Workouts = append(lib.Workouts, *g)
 	}
@@ -359,28 +386,24 @@ func originRank(origin string) int {
 // ErrWorkoutNameTaken is a rename to the name (and sport) of another workout in the library.
 var ErrWorkoutNameTaken = errors.New("store: another workout has that name")
 
-// CreateWorkout adds a workout made in goarmin to user's library: a new entry with goarmin's
-// version only. It returns the version's id; ErrWorkoutNameTaken when the library has a
-// workout of that name and sport (case and spacing aside).
-func (s *Store) CreateWorkout(ctx context.Context, user int64, w fitwatch.Workout, description string) (int64, error) {
-	return s.saveVersion(ctx, user, WorkoutKey(w.Name, w.Sport), w, description, true)
-}
-
 // SaveWorkoutVersion makes or replaces goarmin's own version of user's library entry entryKey:
-// w with description. It returns the version's id; ErrWorkoutNameTaken when another entry has
-// a version of w's name and sport.
-func (s *Store) SaveWorkoutVersion(ctx context.Context, user int64, entryKey string, w fitwatch.Workout, description string) (int64, error) {
-	return s.saveVersion(ctx, user, entryKey, w, description, false)
-}
-
-// saveVersion writes goarmin's version of entryKey; create refuses an entry that exists.
-func (s *Store) saveVersion(ctx context.Context, user int64, entryKey string, w fitwatch.Workout, description string, create bool) (int64, error) {
+// w, its description and kept file fields included. It returns the version's id;
+// ErrWorkoutNameTaken when another entry has a version of w's name and sport.
+func (s *Store) SaveWorkoutVersion(ctx context.Context, user int64, entryKey string, w fitwatch.Workout) (int64, error) {
 	if entryKey == "" {
 		return 0, errors.New("store: a workout version needs its entry")
 	}
 	steps, err := json.Marshal(w.Steps)
 	if err != nil {
 		return 0, err
+	}
+	extra, err := extraJSON(w.Extra)
+	if err != nil {
+		return 0, err
+	}
+	estimated := fitwatch.Total(w.Steps)
+	if x := w.Extra; x != nil && x.F21 != nil && *x.F21 > 0 {
+		estimated = int(*x.F21 / 1000) // the original's stated total, kept
 	}
 	var id int64
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
@@ -399,7 +422,7 @@ func (s *Store) saveVersion(ctx context.Context, user int64, entryKey string, w 
 			if entry == "" {
 				entry = WorkoutKey(name, sport)
 			}
-			if entry != entryKey && WorkoutKey(name, sport) == want || create && entry == entryKey {
+			if entry != entryKey && WorkoutKey(name, sport) == want {
 				taken = true
 			}
 		}
@@ -411,59 +434,91 @@ func (s *Store) saveVersion(ctx context.Context, user int64, entryKey string, w 
 			return ErrWorkoutNameTaken
 		}
 		return tx.QueryRowContext(ctx, `INSERT INTO workouts (user_id, origin, device_id, entry_key, name, sport, sub_sport, steps, estimated_s,
-			description, recorded_at, raw_file_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+			description, extra, recorded_at, raw_file_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 			ON CONFLICT (user_id, entry_key) WHERE origin = 'goarmin' DO UPDATE SET name = excluded.name, sport = excluded.sport,
 				sub_sport = excluded.sub_sport, steps = excluded.steps, estimated_s = excluded.estimated_s,
-				description = excluded.description, recorded_at = excluded.recorded_at
+				description = excluded.description, extra = excluded.extra, recorded_at = excluded.recorded_at
 			RETURNING id`,
-			user, OriginGoarmin, entryKey, strings.TrimSpace(w.Name), w.Sport, w.SubSport, string(steps), fitwatch.Estimate(w.Steps),
-			strings.TrimSpace(description), s.now().Unix()).Scan(&id)
+			user, OriginGoarmin, entryKey, strings.TrimSpace(w.Name), w.Sport, w.SubSport, string(steps), estimated,
+			w.Description, extra, s.now().Unix()).Scan(&id)
 	})
 	return id, err
 }
 
-// DeleteWorkoutVersion removes goarmin's own version id of user's workouts: an edit or a
-// rename (the entry falls back to its originals), or a workout made in goarmin (the entry goes,
-// with its switches and what was sent of it). ErrNotFound for anything else.
+// DeleteWorkoutVersion removes goarmin's own version id of user's workouts: an edit or a rename
+// (the entry falls back to its originals), or a workout made in goarmin, which then leaves the
+// library with its switches, sends and hiding (unless a watch handed its file back). It
+// answers ErrNotFound for any other id.
 func (s *Store) DeleteWorkoutVersion(ctx context.Context, user, id int64) error {
 	return s.db.Tx(ctx, func(tx *sql.Tx) error {
 		var entry string
-		err := tx.QueryRowContext(ctx, `SELECT entry_key FROM workouts WHERE user_id = ? AND id = ? AND origin = ?`, user, id, OriginGoarmin).Scan(&entry)
+		err := tx.QueryRowContext(ctx, `DELETE FROM workouts WHERE user_id = ? AND id = ? AND origin = ? RETURNING entry_key`,
+			user, id, OriginGoarmin).Scan(&entry)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		if err != nil {
+		if err != nil || !strings.HasPrefix(entry, newEntryPrefix) {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM workouts WHERE id = ?`, id); err != nil {
+		var left int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workouts WHERE user_id = ? AND entry_key = ?`, user, entry).Scan(&left); err != nil || left > 0 {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT entry_key, name, sport FROM workouts WHERE user_id = ?`, user)
-		if err != nil {
-			return err
-		}
-		left := false
-		for rows.Next() {
-			var e, name, sport string
-			if err := rows.Scan(&e, &name, &sport); err != nil {
-				rows.Close()
-				return err
-			}
-			if e == entry || e == "" && WorkoutKey(name, sport) == entry {
-				left = true
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil || left {
-			return err
-		}
-		for _, t := range []string{"workout_targets", "watch_sends"} {
+		for _, t := range []string{"workout_targets", "watch_sends", "workout_hidden"} {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE user_id = ? AND entry_key = ?`, user, entry); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// newEntryPrefix starts the entry key of a workout made in goarmin.
+const newEntryPrefix = "goarmin:"
+
+// CreateWorkout adds w, made in goarmin, to user's library as a workout of its own, and returns
+// its version's id; ErrWorkoutNameTaken when the library has a workout of that name and sport.
+func (s *Store) CreateWorkout(ctx context.Context, user int64, w fitwatch.Workout) (int64, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return 0, err
+	}
+	return s.SaveWorkoutVersion(ctx, user, newEntryPrefix+hex.EncodeToString(b[:]), w)
+}
+
+// SetWorkoutFileSHA records the sha of the file goarmin's version id is written as.
+func (s *Store) SetWorkoutFileSHA(ctx context.Context, user, id int64, sha string) error {
+	_, err := s.db.W.ExecContext(ctx, `UPDATE workouts SET file_sha256 = ? WHERE user_id = ? AND id = ? AND origin = ?`, sha, user, id, OriginGoarmin)
+	return err
+}
+
+// SetWorkoutHidden hides user's library workout entryKey from the library, or shows it again.
+// A hidden workout shows while a watch has it.
+func (s *Store) SetWorkoutHidden(ctx context.Context, user int64, entryKey string, hide bool) error {
+	if !hide {
+		_, err := s.db.W.ExecContext(ctx, `DELETE FROM workout_hidden WHERE user_id = ? AND entry_key = ?`, user, entryKey)
+		return err
+	}
+	_, err := s.db.W.ExecContext(ctx, `INSERT INTO workout_hidden (user_id, entry_key, at) VALUES (?, ?, ?)
+		ON CONFLICT (user_id, entry_key) DO NOTHING`, user, entryKey, s.now().Unix())
+	return err
+}
+
+func (s *Store) hiddenWorkouts(ctx context.Context, user int64) (map[string]bool, error) {
+	rows, err := s.db.R.QueryContext(ctx, `SELECT entry_key FROM workout_hidden WHERE user_id = ?`, user)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
 }
 
 // LibraryWorkoutByID returns the library workout one of whose versions has this id, or

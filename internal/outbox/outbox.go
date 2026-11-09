@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karamble/goarmin/internal/figures"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/blobstore"
 	"github.com/karamble/goarmin/pkg/fitwatch"
@@ -68,7 +69,7 @@ func Build(ctx context.Context, st *store.Store, blobs *blobstore.Store, user, d
 		if len(out) == MaxFiles {
 			break
 		}
-		data, err := WorkoutFile(ctx, st, blobs, e)
+		data, err := FileOf(ctx, st, blobs, e.EntryKey, e.Version)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("outbox: %s: %w", e.Version.Name, err))
 			continue
@@ -78,10 +79,10 @@ func Build(ctx context.Context, st *store.Store, blobs *blobstore.Store, user, d
 	return out, errors.Join(errs...)
 }
 
-// WorkoutFile is the workout file for an entry's version: a watch's file as it is, else the
-// version written as Garmin Connect writes workouts (the same bytes for the same version).
-func WorkoutFile(ctx context.Context, st *store.Store, blobs *blobstore.Store, e store.OutboxEntry) ([]byte, error) {
-	v := e.Version
+// FileOf is the file a watch gets of version v of the library entry entryKey: a watch's own
+// file as it came, else the version written as Garmin Connect writes a workout, its exercises
+// titled from the catalogue.
+func FileOf(ctx context.Context, st *store.Store, blobs *blobstore.Store, entryKey string, v store.WorkoutRow) ([]byte, error) {
 	if v.Origin == store.OriginWatch && v.RawFileID != 0 {
 		f, err := st.RawFile(ctx, v.RawFileID)
 		if err != nil {
@@ -92,9 +93,22 @@ func WorkoutFile(ctx context.Context, st *store.Store, blobs *blobstore.Store, e
 	// A file of goarmin's own: the same bytes for the same version, so a resend is the same
 	// workout to the watch.
 	h := fnv.New32a()
-	h.Write([]byte(e.EntryKey))
+	h.Write([]byte(entryKey))
 	fmt.Fprint(h, v.ID)
-	return fitwatch.EncodeWorkout(v.Workout, e.Description, fitwatch.EncodeOptions{Serial: h.Sum32() | 1, Created: v.RecordedAt})
+	w := v.Workout
+	if cat, err := figures.Load(); err == nil {
+		w.Steps = append([]fitwatch.Step(nil), w.Steps...)
+		for i, s := range w.Steps {
+			if e := s.Exercise; e != nil && e.Title == "" {
+				if x, _, ok := cat.Lookup(e.Category, e.Number); ok {
+					t := *e
+					t.Title = x.Title
+					w.Steps[i].Exercise = &t
+				}
+			}
+		}
+	}
+	return fitwatch.EncodeWorkout(w, fitwatch.EncodeOptions{Serial: h.Sum32() | 1, Created: v.RecordedAt})
 }
 
 // Record keeps what became of the files pushed to device for user at at.

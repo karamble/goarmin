@@ -89,8 +89,9 @@ area and access level.
     night's stages, naps, body and weigh-ins, ECG, physiology, health status, hydration,
     snapshots.
   - **Training:** activities with laps, zones and tracks, lifetime totals, Garmin Coach,
-    records, gear, golf clubs, the workout library (make, edit, rename and send workouts),
-    the exercise catalogue, courses.
+    records, gear, golf clubs, the workout library, the exercise catalogue, courses; building,
+    editing, duplicating, renaming and hiding workouts (`create_workout`, `update_workout`: the
+    steps as `get_workout` returns them), and putting them on a watch (`set_workout_on_watch`).
   - **Calendar:** the calendar; plan, move and remove workouts.
   - **Devices:** devices, Sync now, settings, sync logs, files on the watch, solar, settings
     history, live readings, Bluetooth, sync nodes; removals.
@@ -117,7 +118,7 @@ area and access level.
   |---|---|
   | `goarmin://activities/{id}/fit` | an activity's original FIT file |
   | `goarmin://courses/{id}/fit` | a course as FIT |
-  | `goarmin://workouts/{id}/fit` | a library workout as the FIT file goarmin sends a watch |
+  | `goarmin://workouts/{id}/fit` | a workout as the FIT file a watch gets |
   | `goarmin://files/{id}` | any stored raw file |
   | `goarmin://devices/{id}/raw.zip` | a device's raw files, zipped |
   | `goarmin://exercises/{category}/{number}` | an exercise with its figure's key poses |

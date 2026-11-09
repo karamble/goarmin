@@ -215,8 +215,8 @@ func seedWatch(ctx context.Context, st *store.Store, user int64, now time.Time) 
 		return err
 	}
 	connect := func(name, sport, sub, desc string, days int, steps ...fitwatch.Step) gcexport.Workout {
-		return gcexport.Workout{Workout: fitwatch.Workout{Name: name, Sport: sport, SubSport: sub, Steps: steps, EstimatedS: fitwatch.Estimate(steps)},
-			Description: desc, Updated: now.AddDate(0, 0, days)}
+		return gcexport.Workout{Workout: fitwatch.Workout{Name: name, Sport: sport, SubSport: sub, Steps: steps, EstimatedS: fitwatch.Estimate(steps),
+			Description: desc}, Updated: now.AddDate(0, 0, days)}
 	}
 	exp := &gcexport.Result{Kind: "workouts", Workouts: []gcexport.Workout{
 		connect("Core 20", "training", "strength_training", "Twenty minutes for the middle.", -30, files["workout-strength"].Workout.Steps...),
@@ -230,6 +230,33 @@ func seedWatch(ctx context.Context, st *store.Store, user int64, now time.Time) 
 	}}
 	if _, err := st.WriteExportFile(ctx, jf, exp, "devseed", 1); err != nil {
 		return err
+	}
+	// Two workouts built in goarmin: strength in sets and a circuit; a run with targets.
+	ex := func(cat string, n int, title string) *fitwatch.Exercise {
+		return &fitwatch.Exercise{Category: cat, Number: n, Name: title, Title: title}
+	}
+	for _, w := range []fitwatch.Workout{
+		{Name: "Built: Core Sets", Sport: "training", SubSport: "strength_training", Description: "Made in the workout builder.", Steps: []fitwatch.Step{
+			{Index: 0, Intensity: "warmup", Duration: "time", DurationValue: 300},
+			{Index: 1, Intensity: "active", Duration: "reps", DurationValue: 12, Target: "open", Exercise: ex("plank", 43, "Plank")},
+			{Index: 2, Intensity: "rest", Duration: "time", DurationValue: 60, Target: "open"},
+			{Index: 3, Duration: "repeat", From: 1, Repeat: 3},
+			{Index: 4, Intensity: "active", Duration: "time", DurationValue: 40, Exercise: ex("core", 51, "Cat Cow")},
+			{Index: 5, Intensity: "active", Duration: "time", DurationValue: 40, Exercise: ex("pose", 11, "Child's Pose")},
+			{Index: 6, Intensity: "rest", Duration: "time", DurationValue: 20, Target: "open"},
+			{Index: 7, Duration: "repeat", From: 4, Repeat: 4},
+		}},
+		{Name: "Built: 6 x 400 m", Sport: "running", SubSport: "generic", Steps: []fitwatch.Step{
+			{Index: 0, Intensity: "warmup", Duration: "time", DurationValue: 600, Target: "heart_rate", TargetZone: 2},
+			{Index: 1, Intensity: "active", Duration: "distance", DurationValue: 400, Target: "speed", TargetLow: 4.2, TargetHigh: 4.6},
+			{Index: 2, Intensity: "recovery", Duration: "time", DurationValue: 90},
+			{Index: 3, Duration: "repeat", From: 1, Repeat: 6},
+			{Index: 4, Intensity: "cooldown", Duration: "open"},
+		}},
+	} {
+		if _, err := st.CreateWorkout(ctx, user, w); err != nil && !errors.Is(err, store.ErrWorkoutNameTaken) {
+			return err // seeding again finds it made already
+		}
 	}
 	// The watch took stock 20 minutes ago: Morning Mobility had been deleted there.
 	return st.SetWatchInventory(ctx, dev.ID, store.WatchInventory{Types: []string{"FIT_TYPE_5"}, At: now.Add(-20 * time.Minute), Items: []store.InventoryItem{

@@ -42,7 +42,7 @@ var Resources = []Resource{
 	{Name: "course_fit", Title: "Course FIT file", Template: "goarmin://courses/{id}/fit", Method: "GET", Path: "/api/courses/{id}/fit",
 		MIME: "application/vnd.ant.fit", Desc: "A course as a FIT file (list_courses gives the ids)."},
 	{Name: "workout_fit", Title: "Workout FIT file", Template: "goarmin://workouts/{id}/fit", Method: "GET", Path: "/api/workouts/{id}/fit",
-		MIME: "application/vnd.ant.fit", Desc: "A library workout as the FIT file goarmin sends to a watch (list_workouts gives the ids)."},
+		MIME: "application/vnd.ant.fit", Desc: "A library workout as the FIT file a watch gets of it (list_workouts gives the ids)."},
 	{Name: "raw_file", Title: "Stored file", Template: "goarmin://files/{id}", Method: "GET", Path: "/api/files/{id}/download",
 		MIME: "application/octet-stream", Desc: "Any stored raw file, as it arrived (list_files gives the ids)."},
 	{Name: "device_raw_zip", Title: "A device's raw files", Template: "goarmin://devices/{id}/raw.zip", Method: "GET", Path: "/api/devices/{id}/raw.zip",

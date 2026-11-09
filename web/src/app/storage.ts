@@ -18,11 +18,3 @@ export function save(key: string, value: string, area: 'local' | 'session' = 'lo
     /* blocked */
   }
 }
-
-export function drop(key: string, area: 'local' | 'session' = 'local'): void {
-  try {
-    ;(area === 'local' ? localStorage : sessionStorage).removeItem('goarmin.' + key)
-  } catch {
-    /* blocked */
-  }
-}

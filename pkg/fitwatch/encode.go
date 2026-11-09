@@ -6,9 +6,11 @@ package fitwatch
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -82,9 +84,12 @@ func rawField(num byte, bt basetype.BaseType, v proto.Value) proto.Field {
 	return proto.Field{FieldBase: &proto.FieldBase{Num: num, Name: fmt.Sprintf("field_%d", num), BaseType: bt, Scale: 1}, Value: v}
 }
 
-// EncodeWorkout writes w as a FIT workout file. description is the workout's text (empty for
-// none). Repeat steps refer to the Index of their first step; they are renumbered in order.
-func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, error) {
+// EncodeWorkout writes w as a FIT workout file, message for message as Garmin Connect writes
+// one (docs/protocol/08): the description in a 160-byte field and whole in a memo, notes in
+// memos, repeat steps with field 18, the workout's unnamed fields from w.Extra (else Connect's
+// values for a user's workout, the total from Total). Repeat steps refer to the Index of their
+// first step; they are renumbered in order.
+func EncodeWorkout(w Workout, opt EncodeOptions) ([]byte, error) {
 	if err := ValidateWorkout(w); err != nil {
 		return nil, err
 	}
@@ -97,27 +102,23 @@ func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, er
 	for i, s := range w.Steps {
 		pos[s.Index] = i
 	}
-	msgs := []proto.Message{fileID(typedef.FileWorkout, opt), fileCreator(garminConnectSoftware)}
+	software := uint16(garminConnectSoftware)
+	if w.Extra != nil && w.Extra.Software != nil {
+		software = *w.Extra.Software
+	}
+	msgs := []proto.Message{fileID(typedef.FileWorkout, opt), fileCreator(software)}
 	wk := mesgdef.NewWorkout(nil)
 	wk.WktName, wk.Sport, wk.SubSport = w.Name, sport, sub
-	wk.WktDescription = cutBytes(strings.TrimSpace(description), maxText) // Garmin Connect's run longer
+	desc := w.Description // as given: an original keeps its text to the byte
+	wk.WktDescription = descriptionField(desc)
 	wk.Capabilities = typedef.WorkoutCapabilitiesTcx
 	wk.NumValidSteps, wk.MessageIndex = uint16(len(w.Steps)), 0
-	if est := Estimate(w.Steps); est > 0 {
-		// Garmin Connect's total: duration type time (field 9), value and time in ms (10, 21),
-		// time_flag 0 (23).
-		ms := uint32(est) * 1000
-		wk.UnknownFields = []proto.Field{
-			rawField(9, basetype.Enum, proto.Uint8(uint8(typedef.WktStepDurationTime))),
-			rawField(10, basetype.Uint32, proto.Uint32(ms)),
-			rawField(21, basetype.Uint32, proto.Uint32(ms)),
-			rawField(23, basetype.Enum, proto.Uint8(0)),
-		}
-	}
-	// Field 16: 16 bytes in every workout Garmin Connect writes, zeros (once ending in 1).
-	wk.UnknownFields = append(wk.UnknownFields, proto.Field{FieldBase: &proto.FieldBase{Num: 16, Name: "field_16", BaseType: basetype.Byte,
-		Array: true, Scale: 1}, Value: proto.SliceUint8(make([]byte, 16))})
+	wk.UnknownFields = workoutFields(w)
 	msgs = append(msgs, wk.ToMesg(nil))
+	if desc != "" && (w.Extra == nil || !w.Extra.NoDescriptionMemo) {
+		msgs = append(msgs, memos(typedef.MesgNumWorkout, 0, 17, desc)...)
+	}
+	secondary := w.Extra == nil || !w.Extra.NoSecondary
 
 	type titleKey struct {
 		cat typedef.ExerciseCategory
@@ -126,17 +127,21 @@ func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, er
 	var titles []mesgdef.ExerciseTitle
 	seen := map[titleKey]bool{}
 	for i, s := range w.Steps {
-		st, err := encodeStep(s, i, pos)
+		st, err := encodeStep(s, i, pos, secondary)
 		if err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, st.ToMesg(nil))
 		if notes := strings.TrimSpace(s.Notes); notes != "" && !IsRepeat(s) {
-			msgs = append(msgs, memo(notes, i))
+			msgs = append(msgs, memos(typedef.MesgNumWorkoutStep, i, 8, notes)...)
 		}
-		if s.Exercise != nil && st.ExerciseCategory != typedef.ExerciseCategoryInvalid {
+		if s.Exercise != nil && st.ExerciseCategory != typedef.ExerciseCategoryInvalid && (w.Extra == nil || !w.Extra.NoTitles) {
 			k := titleKey{st.ExerciseCategory, st.ExerciseName}
-			if t := strings.TrimSpace(s.Exercise.Title); t != "" && !seen[k] {
+			t := strings.TrimSpace(s.Exercise.Title)
+			if t == "" {
+				t = ExerciseTitle(exerciseEnum(st.ExerciseCategory, st.ExerciseName))
+			}
+			if t != "" && !seen[k] {
 				seen[k] = true
 				et := mesgdef.NewExerciseTitle(nil)
 				et.ExerciseCategory, et.ExerciseName, et.WktStepName = k.cat, k.num, []string{t}
@@ -145,7 +150,22 @@ func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, er
 			}
 		}
 	}
+	if w.Extra != nil && len(w.Extra.Titles) > 0 {
+		// The original's order where it has the exercise; the rest after, as they come.
+		rank := map[titleKey]int{}
+		for i, k := range w.Extra.Titles {
+			rank[titleKey{typedef.ExerciseCategory(k[0]), k[1]}] = i + 1
+		}
+		at := func(t mesgdef.ExerciseTitle) int {
+			if r := rank[titleKey{t.ExerciseCategory, t.ExerciseName}]; r > 0 {
+				return r
+			}
+			return len(rank) + 1
+		}
+		slices.SortStableFunc(titles, func(a, b mesgdef.ExerciseTitle) int { return cmp.Compare(at(a), at(b)) })
+	}
 	for i := range titles {
+		titles[i].MessageIndex = typedef.MessageIndex(i)
 		msgs = append(msgs, titles[i].ToMesg(nil))
 	}
 	var buf bytes.Buffer
@@ -156,14 +176,99 @@ func EncodeWorkout(w Workout, description string, opt EncodeOptions) ([]byte, er
 	return buf.Bytes(), nil
 }
 
-// memo is a step's notes as a memo_glob, the whole text (Garmin Connect writes it beside the
-// step's notes field).
-func memo(notes string, step int) proto.Message {
-	b := []byte(cutBytes(notes, maxText))
-	m := mesgdef.NewMemoGlob(nil)
-	m.PartIndex, m.MesgNum, m.ParentIndex, m.FieldNum = 0, typedef.MesgNumWorkoutStep, typedef.MessageIndex(step), 8
-	m.Data = append(b, 0)
-	return m.ToMesg(nil)
+// maxDescriptionField is the most bytes Garmin Connect puts in a workout's description field;
+// a longer description is cut to 157 bytes and "...", and kept whole in a memo.
+const maxDescriptionField = 160
+
+// descriptionField is what a workout's description field holds.
+func descriptionField(d string) string {
+	if len(d) <= maxDescriptionField {
+		return d
+	}
+	return cutBytes(d, maxDescriptionField-3) + "..."
+}
+
+// memoPartSize is the size of each part of a memo that does not fit one.
+const memoPartSize = 255
+
+// memos is the whole text of field of message parent as memo_glob messages, as Garmin Connect
+// writes them: one part, the text and its terminating zero; or, when that is over 255 bytes,
+// parts of 255 bytes numbered from 0, the last padded with zeros.
+func memos(mesg typedef.MesgNum, parent int, field uint8, text string) []proto.Message {
+	data := append([]byte(text), 0)
+	var parts [][]byte
+	if len(data) <= memoPartSize {
+		parts = [][]byte{data}
+	} else {
+		for i := 0; i < len(data); i += memoPartSize {
+			p := make([]byte, memoPartSize)
+			copy(p, data[i:min(i+memoPartSize, len(data))])
+			parts = append(parts, p)
+		}
+	}
+	var out []proto.Message
+	for i, p := range parts {
+		m := mesgdef.NewMemoGlob(nil)
+		m.PartIndex, m.MesgNum, m.ParentIndex, m.FieldNum = uint32(i), mesg, typedef.MessageIndex(parent), field
+		m.Data = p
+		out = append(out, m.ToMesg(nil))
+	}
+	return out
+}
+
+// workoutFields are the workout message's unnamed fields: w.Extra's, else what Garmin Connect
+// writes for a workout a user saved (9=0, the total time in ms in 10 and 21, 23=0, field 16
+// zeros). A total Extra lacks comes from Total.
+func workoutFields(w Workout) []proto.Field {
+	x := WorkoutExtra{}
+	if w.Extra != nil {
+		x = *w.Extra
+	} else {
+		zero := uint8(0)
+		x.F9, x.F23, x.F16 = &zero, &zero, make([]byte, 16)
+	}
+	ms := uint32(Total(w.Steps)) * 1000
+	if x.F10 == nil {
+		x.F10 = &ms
+	}
+	if x.F21 == nil {
+		x.F21 = &ms
+	}
+	var out []proto.Field
+	u8 := func(num byte, v *uint8) {
+		if v != nil {
+			out = append(out, rawField(num, basetype.Enum, proto.Uint8(*v)))
+		}
+	}
+	u32 := func(num byte, v *uint32) {
+		if v != nil {
+			out = append(out, rawField(num, basetype.Uint32, proto.Uint32(*v)))
+		}
+	}
+	u8(9, x.F9)
+	u32(10, x.F10)
+	if x.F16 != nil {
+		out = append(out, proto.Field{FieldBase: &proto.FieldBase{Num: 16, Name: "field_16", BaseType: basetype.Byte, Array: true, Scale: 1},
+			Value: proto.SliceUint8(append([]byte(nil), x.F16...))})
+	}
+	u32(21, x.F21)
+	u32(22, x.F22)
+	u8(23, x.F23)
+	u8(24, x.F24)
+	return out
+}
+
+// ExerciseTitle is an exercise's display name from its FIT profile name ("side_plank" → "Side
+// Plank"), for a step without a title of its own.
+func ExerciseTitle(name string) string {
+	if name == "" || strings.Contains(name, "Invalid") {
+		return ""
+	}
+	w := strings.Fields(strings.ReplaceAll(strings.ToLower(name), "_", " "))
+	for i, x := range w {
+		w[i] = strings.ToUpper(x[:1]) + x[1:]
+	}
+	return strings.Join(w, " ")
 }
 
 // hr encodes a heart-rate value of a step: a % of max as is, bpm + 100.
@@ -182,7 +287,7 @@ func power(v float64, pct bool) uint32 {
 	return uint32(math.Round(v)) + 1000
 }
 
-func encodeStep(s Step, i int, pos map[int]int) (*mesgdef.WorkoutStep, error) {
+func encodeStep(s Step, i int, pos map[int]int, secondary bool) (*mesgdef.WorkoutStep, error) {
 	st := mesgdef.NewWorkoutStep(nil)
 	st.MessageIndex = typedef.MessageIndex(i)
 	if IsRepeat(s) {
@@ -193,6 +298,9 @@ func encodeStep(s Step, i int, pos map[int]int) (*mesgdef.WorkoutStep, error) {
 		st.DurationValue = uint32(from)
 		if s.Duration == "repeat" {
 			st.DurationType, st.TargetValue = typedef.WktStepDurationRepeatUntilStepsCmplt, uint32(s.Repeat)
+			// Field 18 = 0 on every such step Garmin Connect writes (likely Connect's
+			// skipLastRestStep or smartRepeat, both false).
+			st.UnknownFields = []proto.Field{rawField(18, basetype.Enum, proto.Uint8(0))}
 		} else {
 			st.DurationType, st.TargetValue = typedef.WktStepDurationRepeatUntilTime, uint32(math.Round(s.DurationValue*1000))
 		}
@@ -230,10 +338,18 @@ func encodeStep(s Step, i int, pos map[int]int) (*mesgdef.WorkoutStep, error) {
 		}
 		st.DurationValue = uint32(math.Round(v))
 	}
+	// Garmin Connect writes a secondary target value of 0 on every step, and the secondary
+	// target type open on a rest (an older writer neither).
+	if secondary {
+		st.SecondaryTargetValue = 0
+	}
+	if secondary && st.Intensity == typedef.IntensityRest {
+		st.SecondaryTargetType = typedef.WktStepTargetOpen
+	}
 	switch s.Target {
 	case "":
 		// No target: a zero value and no type, as Garmin Connect writes a step without one.
-		st.TargetValue, st.SecondaryTargetValue = 0, 0
+		st.TargetValue = 0
 	case "open":
 		st.TargetType, st.TargetValue = typedef.WktStepTargetOpen, 0
 	default:

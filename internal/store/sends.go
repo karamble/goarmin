@@ -84,9 +84,8 @@ func (s *Store) RecordSends(ctx context.Context, user, device int64, recs []Send
 // OutboxEntry is a library workout a watch should get: its entry and the version to send (the
 // one shown: goarmin's own, else a watch's file, else Garmin Connect's).
 type OutboxEntry struct {
-	EntryKey    string
-	Version     WorkoutRow
-	Description string
+	EntryKey string
+	Version  WorkoutRow
 }
 
 // WatchOutbox returns what device should get of user's library at its next sync: every
@@ -107,8 +106,8 @@ func (s *Store) WatchOutbox(ctx context.Context, user, device int64) ([]OutboxEn
 	}
 	var out []OutboxEntry
 	for _, w := range lib.Workouts {
-		if w.Watches[at].Pending == PendingSend {
-			out = append(out, OutboxEntry{EntryKey: w.EntryKey, Version: w.WorkoutRow, Description: w.Description})
+		if w.Watches[at].Pending == PendingSend && !w.Hidden {
+			out = append(out, OutboxEntry{EntryKey: w.EntryKey, Version: w.Versions[0]})
 		}
 	}
 	return out, nil
@@ -122,11 +121,11 @@ type target struct {
 
 // sendState is the last push of a library workout to a watch, and where its item is.
 type sendState struct {
-	ok, refused bool
-	err, uid    string
-	at          time.Time
-	listed      int64 // when an inventory last listed the item (0: not yet, or none)
-	gone        int64 // when an inventory first missed it (0: not)
+	ok, refused   bool
+	err, uid, sha string
+	at            time.Time
+	listed        int64 // when an inventory last listed the item (0: not yet, or none)
+	gone          int64 // when an inventory first missed it (0: not)
 }
 
 // libraryWants loads user's library switches and pushes, by watch and entry.
@@ -154,7 +153,7 @@ func (s *Store) libraryWants(ctx context.Context, user int64) (map[int64]map[str
 		return nil, nil, err
 	}
 	sends := map[int64]map[string]*sendState{}
-	rows, err = s.db.R.QueryContext(ctx, `SELECT s.device_id, s.entry_key, s.ok, s.refused, s.error, s.item_uid, s.at,
+	rows, err = s.db.R.QueryContext(ctx, `SELECT s.device_id, s.entry_key, s.ok, s.refused, s.error, s.item_uid, s.sha256, s.at,
 			COALESCE(wi.listed_at, 0), COALESCE(wi.gone_at, 0)
 		FROM watch_sends s LEFT JOIN watch_items wi ON wi.device_id = s.device_id AND wi.uid = s.item_uid AND s.item_uid <> ''
 		WHERE s.user_id = ? AND s.reason = ?`, user, SendReasonLibrary)
@@ -166,7 +165,7 @@ func (s *Store) libraryWants(ctx context.Context, user int64) (map[int64]map[str
 		var dev, at int64
 		var key string
 		x := &sendState{}
-		if err := rows.Scan(&dev, &key, &x.ok, &x.refused, &x.err, &x.uid, &at, &x.listed, &x.gone); err != nil {
+		if err := rows.Scan(&dev, &key, &x.ok, &x.refused, &x.err, &x.uid, &x.sha, &at, &x.listed, &x.gone); err != nil {
 			return nil, nil, err
 		}
 		x.at = time.Unix(at, 0)
@@ -179,47 +178,26 @@ func (s *Store) libraryWants(ctx context.Context, user int64) (map[int64]map[str
 }
 
 // wantOn works out whether a library workout is wanted on a watch and what the next sync does
-// about it, into p (its State and At already set): shown is the version the library shows,
-// listed the workout's items the watch lists now.
-//
-// The watch has the current version when it has the workout at all, unless the version shown
-// is goarmin's own (an edit or a rename): then only once goarmin sent that version and the
-// watch lists it. An older version it still lists is an old copy, to delete on the watch.
-func wantOn(p *WorkoutPresence, w LibraryWatch, t target, switched bool, x *sendState, shown WorkoutRow, listed map[string]bool) {
-	p.Want = p.State == PresenceOn // never switched: wanted while the watch has any version
+// about it, into p (its State and At already set).
+func wantOn(p *WorkoutPresence, w LibraryWatch, t target, switched bool, x *sendState, current string) {
+	p.Want = p.State == PresenceOn // never switched: wanted while the watch has it
 	if switched {
 		p.Want = t.want
 		if t.want && p.State == PresenceRemoved && p.At.After(t.updated) {
 			p.Want = false // deleted on the watch after it was switched on (in the same second, the switch came after)
 		}
 	}
-	// The wish to send began with the switch, or with the edit if that is newer.
-	since := t.updated
-	edited := shown.Origin == OriginGoarmin
-	if edited && shown.RecordedAt.After(since) {
-		since = shown.RecordedAt
-	}
-	current := p.State == PresenceOn
-	sentNow := x != nil && x.ok && x.uid != "" && listed[x.uid] && !x.at.Before(shown.RecordedAt)
-	if edited {
-		current = p.State == PresenceOn && sentNow
-		for uid := range listed {
-			if !sentNow || uid != x.uid {
-				p.OldCopies++
-			}
-		}
-	}
 	if x != nil && !x.ok {
 		p.Failed = x.err
 	}
 	switch {
-	case p.Want && !current:
+	case p.Want && (p.State != PresenceOn || p.Outdated):
 		switch {
 		case w.SendSupport == "no":
 			p.Failed = "this watch does not take workouts from goarmin"
-		case x != nil && x.refused && !x.at.Before(since):
-			// The watch refused it since it was switched on or edited: not again until then.
-		case x != nil && x.ok && x.gone == 0 && !x.at.Before(since):
+		case x != nil && x.refused && !x.at.Before(t.updated) && (current == "" || x.sha == current):
+			// The watch refused it since it was switched on: not again until switched anew.
+		case x != nil && x.ok && x.gone == 0 && !x.at.Before(t.updated) && (current == "" || x.sha == current):
 			// Sent, and the watch has not missed it (it may not have listed it yet).
 		default:
 			p.Pending = PendingSend

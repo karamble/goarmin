@@ -14,7 +14,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/karamble/goarmin/internal/nodehub"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/fitwatch"
 )
@@ -140,8 +139,10 @@ func workoutJSON(x store.WorkoutRow, steps bool) map[string]any {
 // which of the account's watches it is (watches in the library's order).
 func libraryJSON(x store.LibraryWorkout, watches []store.LibraryWatch, steps bool) map[string]any {
 	out := workoutJSON(x.WorkoutRow, steps)
-	out["origins"] = x.Origins
-	out["made_here"] = !slices.ContainsFunc(x.Versions, func(v store.WorkoutRow) bool { return v.Origin != store.OriginGoarmin })
+	out["origins"], out["tag"] = x.Origins, workoutTag(x)
+	if x.Hidden {
+		out["hidden"] = true
+	}
 	ws := []map[string]any{}
 	for i, p := range x.Watches {
 		d := watches[i]
@@ -159,7 +160,10 @@ func libraryJSON(x store.LibraryWorkout, watches []store.LibraryWatch, steps boo
 		if p.Failed != "" {
 			m["failed"] = p.Failed
 		}
-		if p.OldCopies > 0 {
+		if p.Outdated {
+			m["outdated"] = true
+		}
+		if len(p.OldCopies) > 0 {
 			m["old_copies"] = p.OldCopies
 		}
 		if !d.InventoryAt.IsZero() {
@@ -188,8 +192,11 @@ func (s *Server) workouts(w http.ResponseWriter, r *http.Request, u store.User) 
 		return
 	}
 	out := []map[string]any{}
+	all := r.URL.Query().Get("hidden") == "1"
 	for _, x := range lib.Workouts {
-		out = append(out, libraryJSON(x, lib.Watches, false))
+		if !x.Hidden || all {
+			out = append(out, libraryJSON(x, lib.Watches, false))
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -260,11 +267,7 @@ func (s *Server) setWorkoutWatch(w http.ResponseWriter, r *http.Request, u store
 		s.internalError(w, r, err)
 		return
 	}
-	if x.Watches[i].Pending == store.PendingSend && s.opt.Node != nil && watches[i].Address != "" {
-		if err := s.opt.Node.Sync(nodehub.Request{Addr: watches[i].Address, By: store.StartedByLibrary}); err != nil {
-			s.log.Info("api: the watch gets the workout at its next sync", "device", dev, "err", err)
-		}
-	}
+	s.syncForWorkout(r, x, watches)
 	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
 }
 
@@ -324,7 +327,8 @@ func (s *Server) patchWorkout(w http.ResponseWriter, r *http.Request, u store.Us
 			return
 		}
 	}
-	vid, err := s.st.SaveWorkoutVersion(r.Context(), u.ID, x.EntryKey, wk, desc)
+	wk.Description = desc
+	vid, err := s.st.SaveWorkoutVersion(r.Context(), u.ID, x.EntryKey, wk)
 	if errors.Is(err, store.ErrWorkoutNameTaken) {
 		writeError(w, http.StatusConflict, "another workout in your library has that name")
 		return
@@ -333,12 +337,7 @@ func (s *Server) patchWorkout(w http.ResponseWriter, r *http.Request, u store.Us
 		s.internalError(w, r, err)
 		return
 	}
-	x, watches, err := s.st.LibraryWorkoutByID(r.Context(), u.ID, vid)
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, libraryJSON(x, watches, true))
+	s.savedWorkout(w, r, u, vid, http.StatusOK)
 }
 
 // deleteWorkout removes goarmin's own version of a workout (a rename or edit): the library
