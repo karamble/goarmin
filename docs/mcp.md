@@ -103,7 +103,9 @@ area and access level.
   category or name, and an exercise comes without its figure's pose data. An answer over 1 MB is
   refused with a hint to ask for a shorter period.
 - **Live readings** (`get_live_readings`) open the watch's live link, read for up to 30 seconds
-  and return the readings. Opening takes about 10 seconds and holds the watch's Bluetooth.
+  from the first value and return the readings. Opening takes about 10 seconds and holds the
+  watch's Bluetooth. There is nothing to stop afterwards: the link closes by itself 30 seconds
+  after the read (a call within them reuses it), so scheduled syncs go on.
 - **Adding a watch** works as in the wizard: `start_pairing`, `pairing_scan`, then
   `get_pairing_session` every few seconds, `pairing_select`, and `pairing_confirm` only after
   you compared the code on the watch with the session's (you confirm on the watch too), then

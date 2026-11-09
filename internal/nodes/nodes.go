@@ -28,6 +28,32 @@ import (
 	"github.com/karamble/goarmin/pkg/garmin/realtime"
 )
 
+// reportGrace is how long after a server start a watch's sync node may take to report it: the
+// node notices its broken command poll, reconnects and says hello.
+const reportGrace = 3 * time.Minute
+
+// unreported is the error for a watch no computer that syncs here has reported since the
+// server started. It is nodehub.ErrUnknown to errors.Is, with words that say why.
+type unreported struct {
+	started time.Time
+	fresh   bool // the server started moments ago: its nodes have not all reported yet
+}
+
+func (e unreported) Error() string {
+	if e.fresh {
+		return "the server restarted at " + e.started.Format("15:04:05") +
+			" and the computer that syncs this watch has not reported in yet; it does within a minute, so try again shortly"
+	}
+	return "no computer that syncs here knows this watch: it is not paired with one (Devices › Add a watch), or its sync node is not running"
+}
+
+func (unreported) Is(target error) bool { return target == nodehub.ErrUnknown }
+
+// unknown is the error for a watch nothing here reported.
+func (g *Registry) unknown() error {
+	return unreported{started: g.started, fresh: g.opt.Now().Sub(g.started) < reportGrace}
+}
+
 // ErrOffline is returned for a watch whose sync node has not been heard from for a while.
 var ErrOffline = errors.New("the sync node is offline")
 
@@ -67,6 +93,8 @@ type Registry struct {
 	remotes map[int64]*remote
 	byAddr  map[string]int64 // watch address → the node that reported it last
 
+	started time.Time // when the server started: nodes report their watches after that
+
 	pairMu   sync.Mutex // one pairing start at a time
 	mirror   *mirror    // the last pairing session that ran on a node
 	starting int64      // the node a pairing start waits for (its pushes are not orphans)
@@ -95,7 +123,7 @@ func New(opt Options) *Registry {
 	if opt.PairKeep <= 0 {
 		opt.PairKeep = 10 * time.Minute
 	}
-	return &Registry{opt: opt, log: opt.Logger, remotes: map[int64]*remote{}, byAddr: map[string]int64{}}
+	return &Registry{opt: opt, log: opt.Logger, remotes: map[int64]*remote{}, byAddr: map[string]int64{}, started: opt.Now()}
 }
 
 // NodeInfo is who a node is, as the API resolved its token.
@@ -465,7 +493,7 @@ func (g *Registry) Sync(req nodehub.Request) error {
 	case local:
 		return g.opt.Local.Sync(req)
 	case r == nil:
-		return nodehub.ErrUnknown
+		return g.unknown()
 	}
 	_, err := g.call(context.Background(), r, nodeproto.Command{Kind: nodeproto.CmdSync, Address: req.Addr, By: req.By,
 		IncludeSynced: req.IncludeSynced, Delete: req.Delete})
@@ -550,7 +578,7 @@ func (g *Registry) ForgetLocked(ctx context.Context, addr string) error {
 	case local:
 		return g.opt.Local.ForgetLocked(ctx, addr)
 	case r == nil:
-		return nodehub.ErrUnknown
+		return g.unknown()
 	}
 	_, err := g.call(ctx, r, nodeproto.Command{Kind: nodeproto.CmdForget, Address: addr})
 	if err == nil {
@@ -620,7 +648,7 @@ func (g *Registry) Live(ctx context.Context, addr string) (*nodehub.Viewer, erro
 	case local:
 		return g.opt.Local.Live(ctx, addr)
 	case r == nil:
-		return nil, nodehub.ErrUnknown
+		return nil, g.unknown()
 	}
 	g.mu.Lock()
 	l := r.lives[addr]

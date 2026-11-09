@@ -7,6 +7,7 @@ package nodes
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,5 +124,30 @@ func TestOfflineNode(t *testing.T) {
 	g.Drop(1)
 	if g.Known(addr) || g.Available() {
 		t.Fatal("a revoked node's watch is still routed")
+	}
+}
+
+// TestUnreportedWatch: right after a start the registry says the sync computer has not reported
+// in yet; later, that no computer here knows the watch. Both are nodehub.ErrUnknown.
+func TestUnreportedWatch(t *testing.T) {
+	now := time.Now()
+	g := New(Options{Now: func() time.Time { return now }})
+	now = now.Add(20 * time.Second)
+	err := g.Sync(nodehub.Request{Addr: addr})
+	if !errors.Is(err, nodehub.ErrUnknown) || !strings.Contains(err.Error(), "has not reported in yet") {
+		t.Fatalf("just after the start: %v", err)
+	}
+	if _, err := g.Live(context.Background(), addr); !strings.Contains(err.Error(), "try again shortly") {
+		t.Fatalf("live just after the start: %v", err)
+	}
+	now = now.Add(reportGrace)
+	err = g.ForgetLocked(context.Background(), addr)
+	if !errors.Is(err, nodehub.ErrUnknown) || !strings.Contains(err.Error(), "no computer that syncs here knows this watch") {
+		t.Fatalf("long after the start: %v", err)
+	}
+	// Once the node reports in, the watch is routed.
+	g.Hello(NodeInfo{ID: 1, Name: "laptop", User: 1}, nodeproto.HelloRequest{Watches: []nodeproto.Watch{{Address: addr, Unit: 7}}})
+	if !g.Known(addr) {
+		t.Fatal("the reported watch is not routed")
 	}
 }

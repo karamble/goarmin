@@ -234,7 +234,7 @@ var Tools = []Tool{
 	{Name: "get_device_documents", Title: "What else the watch keeps", Area: "Devices", Level: Read, Method: "GET", Path: "/api/devices/{id}/documents", ReadOnly: true,
 		Desc: "The watch's other records (device, settings and multisport files) as documents.", Args: []Arg{deviceID()}},
 	{Name: "get_live_readings", Title: "Live readings", Area: "Devices", Level: Read, Method: "GET", Path: "/api/devices/{id}/live", ReadOnly: true,
-		Desc: "Open the watch's live link and read its values (heart rate, stress, Body Battery, respiration, steps, calories, floors) for a few seconds. Opening takes about 10 s; it holds the watch's Bluetooth meanwhile.",
+		Desc: "Open the watch's live link and read its values (heart rate, stress, Body Battery, respiration, steps, calories, floors) for a few seconds. Opening takes about 10 s; it holds the watch's Bluetooth meanwhile. Nothing to stop afterwards: the link closes by itself 30 s after the read (a call within them reuses it).",
 		Args: []Arg{deviceID(), {Name: "seconds", In: InTool, Type: "integer", Desc: "how long to read once the link is open, 1..30, default 10"}},
 		Run:  liveReadings},
 	{Name: "get_bluetooth", Title: "Bluetooth", Area: "Devices", Level: Read, Method: "GET", Path: "/api/bluetooth", ReadOnly: true,
