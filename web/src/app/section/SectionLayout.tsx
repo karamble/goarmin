@@ -8,7 +8,7 @@ import type { PageDef, SectionDef } from '../routes'
 import { DateNavigator } from './DateNavigator'
 import { HeaderSlotContext, SectionTitleContext } from './HeaderSlot'
 import { carriedSearch } from './search'
-import { DefaultPeriodContext, PeriodsContext } from './usePeriod'
+import { DefaultPeriodContext, FutureContext, PeriodsContext } from './usePeriod'
 import { load, save } from '../storage'
 
 /** SectionIndex sends a bare section URL to its last-used sub-section, else the first. */
@@ -96,6 +96,7 @@ export function SectionLayout({ section }: { section: SectionDef }) {
   const [title, setTitle] = useState('')
   return (
     <PeriodsContext.Provider value={periods}>
+      <FutureContext.Provider value={!!section.future}>
       <DefaultPeriodContext.Provider value={page?.defaultPeriod}>
       <SectionHeader section={section} page={page} right={periods.length > 0 && !editing ? <DateNavigator /> : undefined}
         slot={setSlot} titleOverride={title} />
@@ -107,6 +108,7 @@ export function SectionLayout({ section }: { section: SectionDef }) {
         </SectionTitleContext.Provider>
       </HeaderSlotContext.Provider>
       </DefaultPeriodContext.Provider>
+      </FutureContext.Provider>
     </PeriodsContext.Provider>
   )
 }

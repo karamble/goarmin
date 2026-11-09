@@ -72,7 +72,7 @@ export function DateNavigator() {
             <ChevronRight size={18} />
           </button>
         )}
-        {open && <MonthPopover day={p.day} today={p.today} onPick={(d) => { p.go(d); setOpen(false) }} onClose={() => setOpen(false)} />}
+        {open && <MonthPopover day={p.day} today={p.today} latest={p.latest} onPick={(d) => { p.go(d); setOpen(false) }} onClose={() => setOpen(false)} />}
       </div>
       <button
         type="button"
@@ -93,8 +93,9 @@ function hasData(d: Day): boolean {
   return (d.steps ?? 0) > 0 || d.sleep_score != null || Object.keys(d.values).length > 0
 }
 
-/** MonthPopover picks a day; days with data carry a dot, days after today are off. */
-function MonthPopover({ day, today, onPick, onClose }: { day: string; today: string; onPick: (d: string) => void; onClose: () => void }) {
+/** MonthPopover picks a day; days with data carry a dot, days after latest (today, unless the
+ * section looks ahead) are off. */
+function MonthPopover({ day, today, latest, onPick, onClose }: { day: string; today: string; latest: string; onPick: (d: string) => void; onClose: () => void }) {
   const [month, setMonth] = useState(day.slice(0, 8) + '01')
   const box = useRef<HTMLDivElement>(null)
   const r = periodRange(month, 'month')
@@ -133,7 +134,7 @@ function MonthPopover({ day, today, onPick, onClose }: { day: string; today: str
         <button type="button" aria-label="Previous month" onClick={() => setMonth(addMonths(month, -1))}
           className="grid h-8 w-8 place-items-center rounded-full text-muted hover:text-lime"><ChevronLeft size={16} /></button>
         <span className="font-mono text-[12px] uppercase tracking-[.14em]">{monthName.format(new Date(month + 'T00:00:00Z'))}</span>
-        <button type="button" aria-label="Next month" disabled={addMonths(month, 1) > today} onClick={() => setMonth(addMonths(month, 1))}
+        <button type="button" aria-label="Next month" disabled={addMonths(month, 1) > latest} onClick={() => setMonth(addMonths(month, 1))}
           className="grid h-8 w-8 place-items-center rounded-full text-muted hover:text-lime disabled:opacity-30"><ChevronRight size={16} /></button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center">
@@ -143,7 +144,7 @@ function MonthPopover({ day, today, onPick, onClose }: { day: string; today: str
             <button
               key={d}
               type="button"
-              disabled={d > today}
+              disabled={d > latest}
               onClick={() => onPick(d)}
               aria-current={d === day ? 'date' : undefined}
               data-today={d === today ? '' : undefined}

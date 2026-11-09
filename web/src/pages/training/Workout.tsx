@@ -2,13 +2,17 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { PersonStanding, Repeat } from 'lucide-react'
+import { CalendarPlus, PersonStanding, Repeat } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
 import { useWorkout } from '../../api/hooks/training'
 import type { WorkoutStep } from '../../api/types'
-import { useSectionTitle } from '../../app/section/HeaderSlot'
+import { usePlanActions } from '../../api/hooks/calendar'
+import { HeaderActions, useSectionTitle } from '../../app/section/HeaderSlot'
+import { useToday } from '../../app/section/usePeriod'
+import { Sheet } from '../../ui/Sheet'
+import { useToast } from '../../ui/Toast'
 import { hm, type Units } from '../../lib/format'
 import { FigureDialog, type FigureItem } from '../../figures/FigureDialog'
 import { blocks, durationText, intensityTone, repeatText, stepTitle, strip, targetText } from '../../lib/workout'
@@ -22,6 +26,7 @@ export default function WorkoutPage() {
   const q = useWorkout(id)
   const units = useMe().data?.units ?? 'metric'
   const [figure, setFigure] = useState<number | null>(null)
+  const [planning, setPlanning] = useState(false)
   useSectionTitle(q.data?.name)
   if (!(id > 0)) return <NotFound />
   return (
@@ -40,6 +45,13 @@ export default function WorkoutPage() {
         }
         return (
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
+            <HeaderActions>
+              <button type="button" onClick={() => setPlanning(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-[13px] text-lime hover:border-lime">
+                <CalendarPlus size={14} aria-hidden /> Plan
+              </button>
+            </HeaderActions>
+            {planning && <PlanOn id={w.id} name={w.name} onClose={() => setPlanning(false)} />}
             <section className="card p-5 sm:p-6">
               <Kpis items={[
                 { label: 'Sport', value: sportWords(w.sport, w.sub_sport) },
@@ -86,6 +98,35 @@ export default function WorkoutPage() {
         )
       }}
     </Loaded>
+  )
+}
+
+/** PlanOn puts this workout on a day (the calendar shows it there). */
+function PlanOn({ id, name, onClose }: { id: number; name: string; onClose: () => void }) {
+  const me = useMe().data
+  const today = useToday(me?.timezone ?? '')
+  const [day, setDay] = useState(today)
+  const { add } = usePlanActions()
+  const toast = useToast()
+  const navigate = useNavigate()
+  const submit = () => add.mutate({ day, workout_id: id }, {
+    onSuccess: () => {
+      toast({ text: `${name} planned`, action: { label: 'Open the calendar', run: () => navigate(`/calendar?d=${day}`) } })
+      onClose()
+    },
+    onError: (e) => toast({ text: `Not planned: ${(e as Error).message}`, tone: 'error' }),
+  })
+  return (
+    <Sheet title={`Plan ${name}`} onClose={onClose}
+      footer={<button type="button" onClick={submit} disabled={!day || add.isPending}
+        className="rounded-full bg-lime px-4 py-2 text-[14px] font-medium text-bg disabled:opacity-50">Plan it</button>}>
+      <label className="grid gap-1 text-[13px] text-muted">
+        On
+        <input type="date" value={day} min={today} onChange={(e) => setDay(e.target.value)}
+          className="w-full max-w-[220px] rounded-lg border border-border bg-bg2 px-3 py-2 text-[14px] text-text focus:border-lime focus:outline-none" />
+      </label>
+      <p className="m-0 mt-3 text-[13px] text-muted">The calendar shows it on that day and ticks it off when you record it. It isn't sent to the watch yet.</p>
+    </Sheet>
   )
 }
 

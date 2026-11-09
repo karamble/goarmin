@@ -4,6 +4,7 @@
 
 import { Link } from 'react-router-dom'
 import { useCoachWeek } from '../../api/hooks/data'
+import { useCalendar } from '../../api/hooks/calendar'
 import { useWorkouts } from '../../api/hooks/training'
 import { clock, hm } from '../../lib/format'
 import { distinctWorkouts } from '../../lib/training'
@@ -11,11 +12,13 @@ import { Body } from '../CardFrame'
 import type { CardProps } from '../types'
 import { sportIcon } from './sport'
 
-/** WorkoutToday is Garmin Coach's workout for the day, or else the workouts on the watch (the
- * library's, while no watch has been checked). */
+/** WorkoutToday is the day's own plans, then Garmin Coach's workout, or else the workouts on the
+ * watch (the library's, while no watch has been checked). */
 export default function WorkoutToday({ day, size, isToday }: CardProps) {
   const coach = useCoachWeek(day)
   const saved = useWorkouts()
+  const cal = useCalendar(day, day)
+  const mine = cal.data?.days.find((d) => d.day === day)?.plans ?? []
   const todays = distinctWorkouts((coach.data ?? []).filter((x) => x.day === day && !x.rest_day))
   const rest = (coach.data ?? []).some((x) => x.day === day && x.rest_day)
   // What is on a watch, if goarmin knows; else the whole library (no watch checked yet).
@@ -24,11 +27,32 @@ export default function WorkoutToday({ day, size, isToday }: CardProps) {
   const known = library.some((w) => w.watches.some((x) => x.state !== 'unknown'))
   const list = known ? onWatch : library
   return (
-    <Body q={[coach, saved]} empty={!todays.length && !rest && !list.length} isToday={isToday} size={size}
+    <Body q={[coach, saved]} empty={!mine.length && !todays.length && !rest && !list.length} isToday={isToday} size={size}
       emptyText="No Garmin Coach plan and no saved workouts on the watch">
       {() => (
         <div className="flex h-full flex-col gap-2">
-          {todays.length > 0 ? (
+          {mine.length > 0 && (
+            <>
+              <p className="caps m-0 !text-[10px] !text-faint">Planned by you</p>
+              <ul className="m-0 grid list-none gap-1.5 p-0">
+                {mine.slice(0, size === 'M' ? 2 : 4).map((p) => {
+                  const Icon = sportIcon(p.sport)
+                  return (
+                    <li key={p.id}>
+                      <Link to={`/training/workouts/${p.workout_id}`} className="flex items-center gap-2.5 text-[14px] text-text hover:text-lime">
+                        <Icon size={15} strokeWidth={1.75} className="shrink-0 text-faint" aria-hidden />
+                        <span className="truncate">{p.name}</span>
+                        <span className="num ml-auto shrink-0 text-[12px] text-muted">
+                          {p.done_activity != null ? 'done' : p.estimated_s ? hm(p.estimated_s) : ''}
+                        </span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
+          )}
+          {mine.length > 0 && !todays.length ? null : todays.length > 0 ? (
             <>
               <p className="caps m-0 !text-[10px] !text-faint">Garmin Coach</p>
               {todays.slice(0, size === 'M' ? 2 : 4).map((w) => {

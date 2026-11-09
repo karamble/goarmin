@@ -82,10 +82,11 @@ export function useActivitiesOn(day: string, end: number | undefined) {
 }
 
 /** useRecentActivities is the newest page of activities. */
-export function useRecentActivities(limit = 50) {
+export function useRecentActivities(limit = 50, enabled = true) {
   return useQuery({
     queryKey: keys.activities(limit),
     queryFn: () => request<ActivityPage>('GET', `/activities?limit=${limit}`),
+    enabled,
   })
 }
 

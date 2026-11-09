@@ -47,6 +47,9 @@ type Activity struct {
 	Track              Track
 	// Zones is the watch's own time in zones for the session, when the file has it.
 	Zones *Zones
+	// Workout is the name of the workout the activity followed, when it was recorded with one
+	// (the file then carries the workout and its steps); "" otherwise.
+	Workout string
 }
 
 // Lap is one lap of a session.
@@ -163,7 +166,7 @@ func Decode(b []byte) ([]Activity, error) {
 	sessionZones := map[int]*Zones{}
 	lapZones := map[int]*Zones{}
 	var records []*mesgdef.Record
-	var sportName string
+	var sportName, workout string
 	dec := decoder.New(bytes.NewReader(b))
 	for dec.Next() {
 		f, err := dec.Decode()
@@ -185,6 +188,10 @@ func Decode(b []byte) ([]Activity, error) {
 			case typedef.MesgNumSport:
 				if s := mesgdef.NewSport(m); s.Name != "" && sportName == "" {
 					sportName = s.Name
+				}
+			case typedef.MesgNumWorkout:
+				if w := mesgdef.NewWorkout(m); workout == "" {
+					workout = strings.TrimSpace(w.WktName)
 				}
 			case typedef.MesgNumTimeInZone:
 				z := mesgdef.NewTimeInZone(m)
@@ -216,7 +223,7 @@ func Decode(b []byte) ([]Activity, error) {
 			Ascent: count16(s.TotalAscent), Descent: count16(s.TotalDescent),
 			TrainingEffect: s.TotalTrainingEffectScaled(), AnaerobicEffect: s.TotalAnaerobicTrainingEffectScaled(),
 			TrainingLoad: s.TrainingLoadPeakScaled(),
-			Zones:        sessionZones[i],
+			Zones:        sessionZones[i], Workout: workout,
 		}
 		if math.IsNaN(a.AvgSpeed) {
 			a.AvgSpeed = s.AvgSpeedScaled()

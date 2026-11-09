@@ -4,7 +4,7 @@
 
 import { canPair } from '../lib/devices'
 import {
-  Activity, HeartPulse, LayoutGrid, Radio, Settings, Watch, type LucideIcon,
+  Activity, CalendarDays, HeartPulse, LayoutGrid, Radio, Settings, Watch, type LucideIcon,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 import type { Me } from '../api/types'
@@ -41,6 +41,8 @@ export interface SectionDef {
   periods?: Period[]
   /** On the phone's bottom bar (the rest go to More). */
   bar?: boolean
+  /** Its date may go past today (the calendar, for plans ahead). */
+  future?: boolean
 }
 
 const health: Period[] = ['day', 'week', 'month', 'year']
@@ -48,6 +50,10 @@ const health: Period[] = ['day', 'week', 'month', 'year']
 /** The single registry: rail, bottom bar, tab strips, the router and the palette read it. */
 export const sections: SectionDef[] = [
   { id: 'glance', path: '/', label: 'At a glance', icon: LayoutGrid, pages: [], load: () => import('../glance/GlancePage'), periods: ['day'], bar: true },
+  {
+    id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, pages: [], load: () => import('../pages/calendar/Calendar'),
+    periods: ['month', 'week'], bar: true, future: true,
+  },
   {
     id: 'health', path: '/health', label: 'Health', icon: HeartPulse, bar: true,
     pages: [

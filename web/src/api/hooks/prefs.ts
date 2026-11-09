@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext } from 'react'
 import { request } from '../client'
 import { keys } from '../keys'
-import type { Setting, WatchProfile } from '../types'
+import type { Setting, WatchProfile, CalendarKind } from '../types'
 
 /** Prefs as stored (setting "prefs"); a missing field means the default. */
 export interface Prefs {
@@ -17,6 +17,8 @@ export interface Prefs {
   intensity_goal?: number
   zones?: { source: 'watch' | 'custom' | 'estimate'; max_hr?: number; edges?: number[] }
   onboarding_done?: boolean
+  /** The calendar's kinds the user hid. */
+  calendar_hidden?: CalendarKind[]
 }
 
 export type Source = 'you' | 'watch' | 'default'

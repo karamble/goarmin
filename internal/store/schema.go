@@ -834,4 +834,23 @@ CREATE TABLE watch_items (
 CREATE INDEX watch_items_file ON watch_items(raw_file_id);
 ALTER TABLE devices ADD COLUMN inventory_at INTEGER;
 `,
+	// 18: the calendar. An activity recorded with a workout names it (a reingest fills older
+	// ones). workout_plans are library workouts put on a day; name and sport are kept, so a
+	// plan finds its workout again if the stored version is replaced.
+	`
+ALTER TABLE activities ADD COLUMN workout_name TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE workout_plans (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL REFERENCES users(id),
+	day TEXT NOT NULL,                          -- local date, YYYY-MM-DD
+	workout_id INTEGER NOT NULL,                -- a library workout's version when planned
+	name TEXT NOT NULL,
+	sport TEXT NOT NULL,
+	note TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+CREATE INDEX workout_plans_user_day ON workout_plans(user_id, day);
+`,
 }

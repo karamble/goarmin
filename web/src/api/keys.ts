@@ -32,6 +32,8 @@ export const keys = {
   coach: (from: string, to: string) => ['training', 'coach', from, to] as const,
   totals: ['training', 'totals'] as const,
   workouts: ['training', 'workouts'] as const,
+  calendar: (from: string, to: string) => ['training', 'calendar', from, to] as const,
+  calendarAll: ['training', 'calendar'] as const,
   workout: (id: number) => ['training', 'workouts', id] as const,
   courses: ['training', 'courses'] as const,
   course: (id: number) => ['training', 'courses', id] as const,

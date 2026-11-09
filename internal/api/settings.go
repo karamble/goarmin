@@ -47,7 +47,13 @@ type Prefs struct {
 	IntensityGoal  int         `json:"intensity_goal,omitempty"` // minutes a week; 0 = the watch's goal
 	Zones          *PrefsZones `json:"zones,omitempty"`
 	OnboardingDone bool        `json:"onboarding_done,omitempty"`
+	// CalendarHidden are the calendar's kinds the user hid (calendarKinds).
+	CalendarHidden []string `json:"calendar_hidden,omitempty"`
 }
+
+// calendarKinds are the kinds a calendar day can show, which prefs may hide.
+var calendarKinds = []string{kindActivity, kindPlan, kindSteps, kindSleep, kindHRV, kindNap, kindHeart, kindECG, kindStress,
+	kindBodyBattery, kindWeighIn, kindDrink}
 
 // PrefsZones chooses the heart-rate zones: the watch's (default), custom (a maximum, with five
 // limits or the usual shares of it), or an estimate from the highest heart rate seen.
@@ -75,6 +81,11 @@ func parsePrefs(b []byte) (Prefs, error) {
 		return p, errors.New("prefs: clock must be watch, browser, 24h or 12h")
 	case p.IntensityGoal != 0 && (p.IntensityGoal < 30 || p.IntensityGoal > 1000):
 		return p, errors.New("prefs: intensity_goal must be 30–1000 minutes")
+	}
+	for _, k := range p.CalendarHidden {
+		if !slices.Contains(calendarKinds, k) {
+			return p, errors.New("prefs: calendar_hidden holds an unknown kind")
+		}
 	}
 	if z := p.Zones; z != nil {
 		switch {

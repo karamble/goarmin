@@ -57,6 +57,9 @@ type Runner struct {
 	watches map[string]int64 // USB watch id → its import, queued or running
 	present map[string]bool  // USB watches at the last look
 	usbOf   map[int64]string // import → USB watch id
+	// fresh are the uploads this runner created: recovery at start-up leaves them alone, since
+	// an upload may begin while the runner starts.
+	fresh map[int64]bool
 }
 
 type job struct {
@@ -88,7 +91,7 @@ func New(opt Options) *Runner {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &Runner{opt: opt, log: log, wake: make(chan struct{}, 1), jobs: map[int64]*job{},
-		watches: map[string]int64{}, present: map[string]bool{}, usbOf: map[int64]string{}}
+		watches: map[string]int64{}, present: map[string]bool{}, usbOf: map[int64]string{}, fresh: map[int64]bool{}}
 }
 
 func (r *Runner) staging(id int64) string {
@@ -130,7 +133,17 @@ func (r *Runner) recover(ctx context.Context) {
 		r.log.Error("importer: unfinished imports", "err", err)
 	}
 	keep := map[string]bool{}
+	r.mu.Lock()
+	fresh := make(map[int64]bool, len(r.fresh))
+	for id := range r.fresh {
+		fresh[id] = true
+	}
+	r.mu.Unlock()
 	for _, imp := range left {
+		if fresh[imp.ID] {
+			keep[strconv.FormatInt(imp.ID, 10)] = true // begun since this runner started: not left over
+			continue
+		}
 		if imp.Kind == store.ImportUpload && imp.Status != store.ImportUploading {
 			if _, err := os.Stat(filepath.Join(r.staging(imp.ID), "manifest.json")); err == nil {
 				keep[strconv.FormatInt(imp.ID, 10)] = true
@@ -139,10 +152,18 @@ func (r *Runner) recover(ctx context.Context) {
 				continue
 			}
 		}
-		_ = r.opt.Store.FinishImport(ctx, imp.ID, store.ImportFailed, imp.Report, "the server stopped before the import finished")
+		// Only if it is still as it was seen: an upload whose request is still running at start-up
+		// may queue itself meanwhile.
+		_, _ = r.opt.Store.FailStaleImport(ctx, imp.ID, imp.Status, imp.Report, "the server stopped before the import finished")
 	}
-	// Staging left from imports that are over.
+	// Staging left from imports that are over (an upload begun meanwhile registered itself
+	// before making its folder, so it is in fresh by now).
 	ents, _ := os.ReadDir(filepath.Join(r.opt.DataDir, "imports"))
+	r.mu.Lock()
+	for id := range r.fresh {
+		keep[strconv.FormatInt(id, 10)] = true
+	}
+	r.mu.Unlock()
 	for _, e := range ents {
 		if !keep[e.Name()] {
 			os.RemoveAll(filepath.Join(r.opt.DataDir, "imports", e.Name()))
@@ -150,12 +171,16 @@ func (r *Runner) recover(ctx context.Context) {
 	}
 }
 
+// enqueue queues an import once: one already queued or running (the start-up recovery and a
+// fresh upload can both ask for the same import) is not queued again, so it never runs twice.
 func (r *Runner) enqueue(id int64) {
 	r.mu.Lock()
-	r.queue = append(r.queue, id)
-	if r.jobs[id] == nil {
-		r.jobs[id] = &job{}
+	if r.jobs[id] != nil {
+		r.mu.Unlock()
+		return
 	}
+	r.queue = append(r.queue, id)
+	r.jobs[id] = &job{}
 	r.mu.Unlock()
 	select {
 	case r.wake <- struct{}{}:
@@ -170,6 +195,9 @@ func (r *Runner) NewUpload(ctx context.Context, user store.User) (store.Import, 
 	if err != nil {
 		return store.Import{}, "", err
 	}
+	r.mu.Lock()
+	r.fresh[imp.ID] = true
+	r.mu.Unlock()
 	dir := r.staging(imp.ID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		_ = r.opt.Store.FinishImport(ctx, imp.ID, store.ImportFailed, nil, err.Error())

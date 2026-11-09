@@ -5,7 +5,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMe } from '../../api/hooks/auth'
-import { isDay, periodRange, step as stepDay, today as todayIn, type Period, type Range } from '../../lib/period'
+import { addMonths, isDay, periodRange, step as stepDay, today as todayIn, type Period, type Range } from '../../lib/period'
 
 /** useToday is the current day in tz; it rolls over at midnight. */
 export function useToday(tz: string): string {
@@ -24,9 +24,18 @@ export const PeriodsContext = createContext<Period[]>([])
 /** DefaultPeriodContext is the page's period when the URL names none (else its first one). */
 export const DefaultPeriodContext = createContext<Period | undefined>(undefined)
 
+/** FutureContext lets a section's date go past today (the calendar, for plans ahead): up to two
+ * years. Elsewhere the latest day is today. */
+export const FutureContext = createContext(false)
+
+/** How far ahead a section with FutureContext may go. */
+const aheadMonths = 24
+
 export interface PeriodState {
-  /** The day in focus (?d, absent = today), never after today. */
+  /** The day in focus (?d, absent = today), never after latest. */
   day: string
+  /** The latest day the section may show: today, or two years ahead with FutureContext. */
+  latest: string
   period: Period
   periods: Period[]
   range: Range
@@ -50,9 +59,11 @@ export function usePeriod(): PeriodState {
   const preferred = useContext(DefaultPeriodContext)
   const tz = useMe().data?.timezone ?? ''
   const today = useToday(tz)
+  const future = useContext(FutureContext)
+  const latest = future ? addMonths(today, aheadMonths) : today
   const [q, setQ] = useSearchParams()
   const raw = q.get('d')
-  const day = isDay(raw) && raw < today ? raw : today
+  const day = isDay(raw) && raw !== today && raw <= latest ? raw : today
   const def = preferred && periods.includes(preferred) ? preferred : (periods[0] ?? 'day')
   const rawP = q.get('p') as Period | null
   const period = rawP && periods.includes(rawP) ? rawP : def
@@ -62,7 +73,7 @@ export function usePeriod(): PeriodState {
       setQ(
         (prev) => {
           const n = new URLSearchParams(prev)
-          if (d >= today) n.delete('d')
+          if (d === today || (!future && d > today)) n.delete('d')
           else n.set('d', d)
           if (p === def) n.delete('p')
           else n.set('p', p)
@@ -71,27 +82,27 @@ export function usePeriod(): PeriodState {
         { replace: !push },
       )
     },
-    [setQ, today, def],
+    [setQ, today, def, future],
   )
 
   return useMemo(() => {
     const next = stepDay(day, period, 1)
-    const canNext = period !== 'all' && periodRange(next, period).from <= today
+    const canNext = period !== 'all' && periodRange(next, period).from <= latest
     return {
-      day, period, periods, range: periodRange(day, period), today, isToday: day === today, tz, canNext,
-      go: (d) => write(d > today ? today : d, period),
+      day, latest, period, periods, range: periodRange(day, period), today, isToday: day === today, tz, canNext,
+      go: (d) => write(d > latest ? latest : d, period),
       setPeriod: (p) => periods.includes(p) && write(day, p),
       step: (n) => {
         if (period === 'all') return
         let d = stepDay(day, period, n)
-        if (d > today) {
-          if (periodRange(d, period).from > today) return
-          d = today
+        if (d > latest) {
+          if (periodRange(d, period).from > latest) return
+          d = latest
         }
         write(d, period)
       },
       toToday: () => write(today, period),
       open: (d) => periods.includes('day') && write(d > today ? today : d, 'day', true),
     }
-  }, [day, period, periods, today, tz, write])
+  }, [day, latest, period, periods, today, tz, write])
 }

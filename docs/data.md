@@ -14,7 +14,7 @@ FIT files have a type in their header. goarmin reads these:
 
 | FIT type | File | What goarmin takes | Shown in |
 |---|---|---|---|
-| 4 | Activity | Sessions (one activity each, multisport split), laps, the 1-second track, time in zones, training effects | Training › Activities |
+| 4 | Activity | Sessions (one activity each, multisport split), laps, the 1-second track, time in zones, training effects, the workout it followed | Training › Activities, Calendar |
 | 20 | Activity summary | Sessions without a track (activities another device recorded) | Training › Activities |
 | 32 | Monitoring | Heart rate, steps, distance, calories, active time, intensity minutes, ascent, stress, Body Battery, respiration, SpO2 | Health, At a glance |
 | 49 | Sleep | The night's stages (end-marked levels), scores, the sleep insight | Health › Sleep |

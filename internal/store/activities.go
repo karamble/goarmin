@@ -56,8 +56,9 @@ func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactiv
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO activities (user_id, raw_file_id, session_index, start_ts, end_ts, day,
 			sport, sub_sport, name, elapsed_s, timer_s, distance_m, kcal, avg_hr, max_hr, avg_speed, max_speed, avg_cadence,
-			avg_power, ascent_m, descent_m, training_effect, anaerobic_effect, training_load, min_lat, min_lon, max_lat, max_lon, polyline)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			avg_power, ascent_m, descent_m, training_effect, anaerobic_effect, training_load, min_lat, min_lon, max_lat, max_lon, polyline,
+			workout_name)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (user_id, start_ts, session_index) DO UPDATE SET raw_file_id = excluded.raw_file_id,
 				end_ts = excluded.end_ts, day = excluded.day, sport = excluded.sport, sub_sport = excluded.sub_sport,
 				name = excluded.name, elapsed_s = excluded.elapsed_s, timer_s = excluded.timer_s, distance_m = excluded.distance_m,
@@ -66,11 +67,11 @@ func writeActivities(ctx context.Context, tx *sql.Tx, f RawFile, acts []fitactiv
 				ascent_m = excluded.ascent_m, descent_m = excluded.descent_m, training_effect = excluded.training_effect,
 				anaerobic_effect = excluded.anaerobic_effect, training_load = excluded.training_load,
 				min_lat = excluded.min_lat, min_lon = excluded.min_lon, max_lat = excluded.max_lat, max_lon = excluded.max_lon,
-				polyline = excluded.polyline`+guard,
+				polyline = excluded.polyline, workout_name = excluded.workout_name`+guard,
 			f.UserID, f.ID, a.Index, start, a.End.Unix(), day, a.Sport, a.SubSport, a.Name, nullNaN(a.Elapsed), nullNaN(a.Timer),
 			nullNaN(a.Distance), nullNeg(a.Calories), nullNeg(a.AvgHR), nullNeg(a.MaxHR), nullNaN(a.AvgSpeed), nullNaN(a.MaxSpeed),
 			nullNeg(a.AvgCadence), nullNeg(a.AvgPower), nullNeg(a.Ascent), nullNeg(a.Descent), nullNaN(a.TrainingEffect),
-			nullNaN(a.AnaerobicEffect), nullNaN(a.TrainingLoad), b[0], b[1], b[2], b[3], a.Polyline)
+			nullNaN(a.AnaerobicEffect), nullNaN(a.TrainingLoad), b[0], b[1], b[2], b[3], a.Polyline, a.Workout)
 		if err != nil {
 			return err
 		}
@@ -196,11 +197,13 @@ type ActivitySummary struct {
 	Polyline                        string
 	// Extra is what only Garmin Connect knows about it (from an export): JSON.
 	Extra json.RawMessage
+	// WorkoutName is the workout the activity followed ("" when none or unknown).
+	WorkoutName string
 }
 
 const activityCols = `id, raw_file_id, start_ts, end_ts, day, sport, sub_sport, name, elapsed_s, timer_s, distance_m, kcal,
 	avg_hr, max_hr, avg_speed, max_speed, avg_cadence, avg_power, ascent_m, descent_m, training_effect, anaerobic_effect,
-	training_load, min_lat, min_lon, max_lat, max_lon, polyline, extra`
+	training_load, min_lat, min_lon, max_lat, max_lon, polyline, extra, workout_name`
 
 func scanActivity(row interface{ Scan(...any) error }) (ActivitySummary, error) {
 	var a ActivitySummary
@@ -208,7 +211,7 @@ func scanActivity(row interface{ Scan(...any) error }) (ActivitySummary, error) 
 	err := row.Scan(&a.ID, &a.RawFileID, &a.Start, &a.End, &a.Day, &a.Sport, &a.SubSport, &a.Name, &a.Elapsed, &a.Timer,
 		&a.Distance, &a.Kcal, &a.AvgHR, &a.MaxHR, &a.AvgSpeed, &a.MaxSpeed, &a.AvgCadence, &a.AvgPower, &a.Ascent,
 		&a.Descent, &a.TrainingEffect, &a.AnaerobicEffect, &a.TrainingLoad, &a.MinLat, &a.MinLon, &a.MaxLat, &a.MaxLon,
-		&a.Polyline, &extra)
+		&a.Polyline, &extra, &a.WorkoutName)
 	a.Extra = json.RawMessage(extra)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound

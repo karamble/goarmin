@@ -948,3 +948,61 @@ export interface AccountDocumentRow {
 export interface AccountDocument extends AccountDocumentRow {
   data: unknown
 }
+
+/** The kinds of data a calendar day can hold; the calendar draws one bar each. */
+export type CalendarKind =
+  | 'activity' | 'plan' | 'steps' | 'sleep' | 'hrv' | 'nap' | 'heart' | 'ecg' | 'stress' | 'body_battery' | 'weigh_in' | 'drink'
+
+export interface CalendarActivity {
+  id: number
+  name: string
+  start: number
+  end: number
+  sport: string
+  sub_sport: string
+  sport_label: string
+  timer_s: number | null
+  distance_m: number | null
+  /** The workout it followed, '' if none. */
+  workout: string
+}
+
+/** One of Garmin Coach's workouts on a calendar day, done by an activity of its sport. */
+export interface CalendarCoach extends Omit<CoachDay, 'day'> {
+  done: boolean
+  missed: boolean
+}
+
+/** A library workout put on a day: done (with the activity), missed once the day is past, or
+ * ahead. missing: the workout is no longer stored. */
+export interface Plan {
+  id: number
+  day: string
+  workout_id: number
+  name: string
+  sport: string
+  sub_sport?: string
+  estimated_s?: number
+  step_count?: number
+  note: string
+  missing: boolean
+  done_activity: number | null
+  missed: boolean
+}
+
+export interface CalendarDay {
+  day: string
+  summary: Day | null
+  kinds: Partial<Record<CalendarKind, number>>
+  activities: CalendarActivity[]
+  coach: CalendarCoach[]
+  plans: Plan[]
+}
+
+export interface Calendar {
+  from: string
+  to: string
+  today: string
+  days: CalendarDay[]
+}
+

@@ -113,6 +113,22 @@ func (s *Store) FinishImport(ctx context.Context, id int64, status string, repor
 	return err
 }
 
+// FailStaleImport ends an import the server left behind (failed, with errText) only if it is
+// still in the status it was seen in: an upload that moved on meanwhile (queued by its request)
+// is left alone. It reports whether it ended it.
+func (s *Store) FailStaleImport(ctx context.Context, id int64, seen string, report []byte, errText string) (bool, error) {
+	if report == nil {
+		report = []byte(`{}`)
+	}
+	res, err := s.db.W.ExecContext(ctx, `UPDATE imports SET status = ?, report = ?, error = ?, finished_at = ?,
+		started_at = COALESCE(started_at, ?) WHERE id = ? AND status = ?`, ImportFailed, string(report), errText, s.now().Unix(), s.now().Unix(), id, seen)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // Import returns one of user's imports (ErrNotFound for another account's).
 func (s *Store) Import(ctx context.Context, user, id int64) (Import, error) {
 	return scanImport(s.db.W.QueryRowContext(ctx, `SELECT `+importCols+` FROM imports WHERE id = ? AND user_id = ?`, id, user))

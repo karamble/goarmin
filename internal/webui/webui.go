@@ -33,7 +33,7 @@ func Built() bool {
 
 // Routes are the dashboard's own top-level paths besides "/": the sections of
 // web/src/app/routes.tsx and the sign-in pages of App.tsx. A test keeps the list in step.
-var Routes = []string{"health", "training", "live", "devices", "settings", "login", "setup", "invite"}
+var Routes = []string{"calendar", "health", "training", "live", "devices", "settings", "login", "setup", "invite"}
 
 // isRoute reports whether p (without the leading slash) is one of the dashboard's pages.
 func isRoute(p string) bool {

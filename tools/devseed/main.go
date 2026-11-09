@@ -117,6 +117,9 @@ func seed(ctx context.Context, st *store.Store, user int64, n int, now time.Time
 	if err := seedWatch(ctx, st, user, now); err != nil {
 		return nil, err
 	}
+	if err := seedPlans(ctx, st, user, now, loc); err != nil {
+		return nil, err
+	}
 	out := make([]string, 0, len(touched))
 	for d := range touched {
 		out = append(out, d)
@@ -231,6 +234,37 @@ func seedWatch(ctx context.Context, st *store.Store, user int64, now time.Time) 
 	// The watch took stock 20 minutes ago: Morning Mobility had been deleted there.
 	return st.SetWatchInventory(ctx, dev.ID, store.WatchInventory{Types: []string{"FIT_TYPE_5"}, At: now.Add(-20 * time.Minute), Items: []store.InventoryItem{
 		{UID: items["workout-intervals"], Type: "FIT_TYPE_5", Size: 400}, {UID: items["workout-strength"], Type: "FIT_TYPE_5", Size: 600}}})
+}
+
+// seedPlans puts library workouts on days around now: one a few days ago (missed, or done by a
+// run that day), today's, and three ahead.
+func seedPlans(ctx context.Context, st *store.Store, user int64, now time.Time, loc *time.Location) error {
+	lib, err := st.WorkoutLibrary(ctx, user)
+	if err != nil {
+		return err
+	}
+	byName := map[string]store.LibraryWorkout{}
+	for _, w := range lib.Workouts {
+		byName[w.Name] = w
+	}
+	for _, p := range []struct {
+		name string
+		days int
+		note string
+	}{
+		{"Morning Mobility", -5, ""}, {"6 × 400 m", -3, "on the track"}, {"Core 20", 0, ""},
+		{"6 × 400 m", 2, ""}, {"Alignment 101", 4, "slowly"}, {"10-Minute AMRAP", 9, ""},
+	} {
+		w, ok := byName[p.name]
+		if !ok {
+			return fmt.Errorf("devseed: no workout %q to plan", p.name)
+		}
+		if _, err := st.AddPlan(ctx, user, store.WorkoutPlan{Day: now.In(loc).AddDate(0, 0, p.days).Format(time.DateOnly), WorkoutID: w.ID,
+			Name: w.Name, Sport: w.Sport, Note: p.note}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // nightOf is the night that ends on day k: to bed about 22:30 the evening before, up about

@@ -36,6 +36,29 @@ A board of cards you arrange yourself.
 - The layout is saved to your account, so it follows you to another browser.
 - **Getting started** guides a new account (passkey, a watch or an import, the first sync, preferences) until every step is done or you hide it.
 
+## Calendar
+
+The days by month (or by week, as an agenda), with what you recorded and what you planned.
+
+- **A day's bars:** one short bar per kind of data, in goarmin's colours: activities (lime, one
+  each), planned workouts (hatched: Garmin Coach's and your own, ✓ once done, faint when missed),
+  steps (faint below the goal), sleep, HRV and naps (cyan), heart rate and ECG (pink), stress and
+  Body Battery (amber), weigh-ins and drinks (grey). On a wide screen a day names its activities
+  and plans and gives each bar its number ("Sleep 79", "7,305 steps"); "+n" counts what doesn't
+  fit.
+- **Show** in the header hides kinds you don't want; the choice is saved to your account.
+- **A day** opens beside the month (a sheet on a phone): its timeline (heart rate, stress, Body
+  Battery, sleep and activities), what was planned, its activities, and a line per value
+  recorded (steps against the goal, sleep and sleep need, HRV, heart rate, stress, Body Battery
+  charged and drained, breathing, intensity minutes, calories, weight, drinks, ECG, naps), each
+  opening its page for that day. ◀ ▶ move day by day; arrow keys move through the grid.
+- **Your own plans:** *Plan a workout* on a day (or *Plan* on a workout's page, or the palette)
+  puts a workout of your library on a day. A plan counts as done when you record an activity
+  that day that followed that workout (else one of its sport); it is missed once the day is past.
+  Drag a plan to another day on a wide screen, or use *Move to…*; *Remove* has an Undo. Plans are
+  kept in goarmin; sending them to the watch comes later.
+- The calendar looks ahead two years, for plans; Garmin Coach's week ahead shows there too.
+
 ## Health
 
 Every tab has day, week, month and year views. Each chart has a table view (**Table**) with

@@ -22,7 +22,10 @@ person in the household. No Garmin account, phone or cloud is needed.
   - Activities with a map, linked charts, laps, splits and time in zones.
   - Performance over the years: VO2 max, training status, readiness, load, race predictions,
     endurance, hill score.
-  - Garmin Coach's plan, the watch's workouts and courses, personal records, gear.
+  - Garmin Coach's plan, a workout library (the watch's and Garmin Connect's workouts, and which
+    are on each watch), courses, personal records, gear.
+- **Calendar.** Every day with bars for what was recorded, a day view with its timeline and
+  values, Garmin Coach's plan and your own planned workouts, ticked off when done.
   - A 3D figure for every exercise a workout can name (1,846): View pose on a workout's steps,
     and a searchable catalogue under Training › Exercises.
 - **Live.** Heart rate, stress, Body Battery, breathing, steps, calories and floors as the watch

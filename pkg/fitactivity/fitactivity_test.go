@@ -163,3 +163,21 @@ func TestTimeInZone(t *testing.T) {
 		t.Fatalf("lap zones %+v", lz)
 	}
 }
+
+// An activity recorded with a workout names it; one without has none.
+func TestWorkoutName(t *testing.T) {
+	end := time.Now().Add(-time.Hour).Truncate(time.Second)
+	start := end.Add(-10 * time.Minute)
+	s := mesgdef.NewSession(nil)
+	s.StartTime, s.Timestamp, s.TotalTimerTime, s.Sport = start, end, 600000, typedef.SportTraining
+	w := mesgdef.NewWorkout(nil)
+	w.WktName, w.Sport = " Core 20 ", typedef.SportTraining
+	acts, err := Decode(fittest.Build(typedef.FileActivity, 1, end, w.ToMesg(nil), s.ToMesg(nil)))
+	if err != nil || len(acts) != 1 || acts[0].Workout != "Core 20" {
+		t.Fatalf("with a workout: %+v, %v", acts, err)
+	}
+	acts, err = Decode(fittest.Build(typedef.FileActivity, 1, end, s.ToMesg(nil)))
+	if err != nil || acts[0].Workout != "" {
+		t.Fatalf("without: %q, %v", acts[0].Workout, err)
+	}
+}

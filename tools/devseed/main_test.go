@@ -112,6 +112,9 @@ func TestSeed(t *testing.T) {
 	if states[store.PresenceOn] != 2 || states[store.PresenceRemoved] != 1 || states[store.PresenceAbsent] != 2 {
 		t.Fatalf("where the workouts are: %v", states)
 	}
+	if plans, err := st.Plans(ctx, u.ID, now.AddDate(0, 0, -10).Format(time.DateOnly), now.AddDate(0, 0, 10).Format(time.DateOnly)); err != nil || len(plans) != 6 {
+		t.Fatalf("%d plans, %v", len(plans), err)
+	}
 	ahead, err := st.SuggestedWorkouts(ctx, u.ID, to, now.AddDate(0, 0, 6).Format(time.DateOnly))
 	if err != nil || len(ahead) < 6 {
 		t.Fatalf("%d planned workouts this week, %v", len(ahead), err)

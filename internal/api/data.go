@@ -7,6 +7,7 @@ package api
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -65,20 +66,28 @@ func (s *Server) daily(w http.ResponseWriter, r *http.Request, u store.User) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	days, err := s.st.DaySummaries(r.Context(), u.ID, from, to)
+	out, err := s.dailyJSON(r.Context(), u.ID, from, to)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	vals, err := s.st.DailyValues(r.Context(), u.ID, from, to)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// dailyJSON is user's days in [from, to] as /api/daily serves them: each day's summary, its
+// once-a-day values and its HRV night, by day.
+func (s *Server) dailyJSON(ctx context.Context, user int64, from, to string) ([]map[string]any, error) {
+	days, err := s.st.DaySummaries(ctx, user, from, to)
 	if err != nil {
-		s.internalError(w, r, err)
-		return
+		return nil, err
 	}
-	hrv, err := s.st.HRVNights(r.Context(), u.ID, from, to)
+	vals, err := s.st.DailyValues(ctx, user, from, to)
 	if err != nil {
-		s.internalError(w, r, err)
-		return
+		return nil, err
+	}
+	hrv, err := s.st.HRVNights(ctx, user, from, to)
+	if err != nil {
+		return nil, err
 	}
 	byDay := map[string]map[string]float64{}
 	for _, v := range vals {
@@ -110,7 +119,7 @@ func (s *Server) daily(w http.ResponseWriter, r *http.Request, u store.User) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["day"].(string) < out[j]["day"].(string) })
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 func orEmpty(m map[string]float64) map[string]float64 {

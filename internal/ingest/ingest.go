@@ -28,8 +28,9 @@ const (
 	// 2: step goal, sleep need, nightly HRV; 3: activities, Garmin Coach; 4: four weeks of
 	// nightly HRV; 5: timestamp_16 from the last monitoring record; 6: the watch's own time in
 	// zones, its settings, sport profiles, goals, lifetime totals, workouts and courses; 7: sleep
-	// stages read as the end of each interval, nights merged from parts, naps.
-	Version = 7
+	// stages read as the end of each interval, nights merged from parts, naps; 8: the workout an
+	// activity followed.
+	Version = 8
 )
 
 // fitTypeActivity is FIT file type 4: its sessions become activities; an activity summary (20)

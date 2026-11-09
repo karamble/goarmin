@@ -109,6 +109,7 @@ function Palette({ sections, onClose }: { sections: SectionDef[]; onClose: () =>
     out.push({ id: 'import-files', label: 'Import files', hint: 'Devices › Import', icon: Upload, run: () => navigate('/devices/import') })
     out.push({ id: 'import-usb', label: 'Import from the watch on USB', hint: 'Devices › Import', icon: Usb, run: () => navigate('/devices/import#usb') })
     out.push({ id: 'customize', label: 'Customize the glance', icon: LayoutGrid, run: () => navigate('/?edit=1') })
+    out.push({ id: 'plan', label: 'Plan a workout', hint: 'Calendar', icon: CalendarCheck, run: () => navigate('/calendar?plan=1') })
     out.push({ id: 'prefs', label: 'Preferences', hint: 'Settings › Profile', icon: SlidersHorizontal, run: () => navigate('/settings/profile') })
     out.push({ id: 'about', label: 'About goarmin', hint: 'source and disclaimer', icon: Info, run: openAbout })
     out.push({ id: 'logout', label: 'Sign out', icon: LogOut, run: () => logout.mutate() })

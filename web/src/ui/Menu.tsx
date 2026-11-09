@@ -9,6 +9,8 @@ export interface MenuItem {
   run: () => void
   disabled?: boolean
   checked?: boolean
+  /** A checkbox (one of several to switch on and off): the menu stays open. */
+  checkbox?: boolean
   danger?: boolean
   /** Starts a new group with this heading. */
   group?: string
@@ -54,11 +56,12 @@ export function Menu({ label, icon, items, className = '' }: { label: string; ic
           {items.map((it, i) => (
             <div key={i}>
               {it.group && <p className="caps m-0 px-2.5 pb-1 pt-2 !text-[10px] !text-faint">{it.group}</p>}
-              <button type="button" role={it.checked != null ? 'menuitemradio' : 'menuitem'} aria-checked={it.checked} disabled={it.disabled}
-                onClick={() => { setOpen(false); it.run() }}
+              <button type="button" role={it.checkbox ? 'menuitemcheckbox' : it.checked != null ? 'menuitemradio' : 'menuitem'} aria-checked={it.checked}
+                disabled={it.disabled}
+                onClick={() => { if (!it.checkbox) setOpen(false); it.run() }}
                 className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] disabled:opacity-35 ${
                   it.danger ? 'text-err hover:bg-red/10' : 'text-text hover:bg-panel2'} ${it.checked ? 'text-lime' : ''}`}>
-                <span className="w-3 text-lime">{it.checked ? '•' : ''}</span>
+                <span aria-hidden className="w-3 text-lime">{it.checked ? (it.checkbox ? '✓' : '•') : ''}</span>
                 {it.label}
               </button>
             </div>
