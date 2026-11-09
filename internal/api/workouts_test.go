@@ -19,6 +19,7 @@ import (
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/auth"
 	"github.com/karamble/goarmin/pkg/fitid/fittest"
+	"github.com/karamble/goarmin/pkg/fitwatch"
 )
 
 // A workout a node handed over is in the library; the node's inventory says whether the watch
@@ -130,5 +131,33 @@ func TestWorkoutLibraryThroughANode(t *testing.T) {
 	}
 	if code := ne.nodeDo(node.Token, http.MethodPost, "/inventory", nodeproto.InventoryRequest{Unit: unit}, nil); code != http.StatusBadRequest {
 		t.Fatalf("an inventory without types: %d", code)
+	}
+}
+
+// TestEditedExtra: an edited original keeps its workout message's own fields and its titles'
+// order, written as Garmin Connect writes today; its stated total only while the steps take as
+// long as before.
+func TestEditedExtra(t *testing.T) {
+	one, total, sw := uint8(1), uint32(1_800_000), uint16(2517)
+	old := fitwatch.Workout{EstimatedS: 1800, Steps: []fitwatch.Step{{Index: 0, Duration: "time", DurationValue: 60}},
+		Extra: &fitwatch.WorkoutExtra{Software: &sw, NoDescriptionMemo: true, NoSecondary: true, NoTitles: true, F9: &one, F10: &total, F21: &total,
+			F16: make([]byte, 16), Titles: [][2]uint16{{19, 43}}}}
+	same := fitwatch.Workout{Steps: []fitwatch.Step{{Index: 0, Duration: "time", DurationValue: 60, Notes: "slow"}}}
+	x := editedExtra(old, same)
+	if x == nil || x.F9 == nil || *x.F9 != 1 || x.F21 == nil || *x.F21 != total || len(x.Titles) != 1 {
+		t.Fatalf("the same timing: %+v", x)
+	}
+	if x.Software != nil || x.NoDescriptionMemo || x.NoSecondary || x.NoTitles {
+		t.Errorf("an edit is written as Garmin Connect writes today: %+v", x)
+	}
+	if old.Extra.Software == nil || !old.Extra.NoTitles {
+		t.Error("the original's fields were changed")
+	}
+	longer := fitwatch.Workout{Steps: []fitwatch.Step{{Index: 0, Duration: "time", DurationValue: 90}}}
+	if x := editedExtra(old, longer); x == nil || x.F10 != nil || x.F21 != nil || x.F9 == nil {
+		t.Errorf("longer steps: %+v", x)
+	}
+	if x := editedExtra(fitwatch.Workout{}, longer); x != nil {
+		t.Errorf("nothing kept: %+v", x)
 	}
 }

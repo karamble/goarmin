@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -260,13 +259,7 @@ func (s *Server) putWorkout(w http.ResponseWriter, r *http.Request, u store.User
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if x.Extra != nil {
-		extra := *x.Extra
-		if !reflect.DeepEqual(wk.Steps, x.Steps) {
-			extra.F10, extra.F21 = nil, nil // the steps changed: goarmin states the total
-		}
-		wk.Extra = &extra
-	}
+	wk.Extra = editedExtra(x.Workout, wk)
 	vid, err := s.st.SaveWorkoutVersion(r.Context(), u.ID, x.EntryKey, wk)
 	if errors.Is(err, store.ErrWorkoutNameTaken) {
 		writeError(w, http.StatusConflict, "another workout in your library has that name")
@@ -277,6 +270,37 @@ func (s *Server) putWorkout(w http.ResponseWriter, r *http.Request, u store.User
 		return
 	}
 	s.savedWorkout(w, r, u, vid, http.StatusOK)
+}
+
+// editedExtra is what an edited workout keeps of the file fields its version had: the workout
+// message's unnamed fields and the exercise titles' order, written as Garmin Connect writes
+// today (with a description memo, secondary target values and titles, whatever wrote the
+// original). The stated total stays while the steps take as long as before; otherwise goarmin
+// states the steps' time.
+func editedExtra(old, w fitwatch.Workout) *fitwatch.WorkoutExtra {
+	if old.Extra == nil {
+		return nil
+	}
+	x := *old.Extra
+	x.Software, x.NoDescriptionMemo, x.NoSecondary, x.NoTitles = nil, false, false, false
+	if !sameTiming(old.Steps, w.Steps) {
+		x.F10, x.F21 = nil, nil
+	}
+	return &x
+}
+
+// sameTiming reports whether two step lists take the same time: the same durations and
+// repeats in the same order (names, notes, targets and exercises aside).
+func sameTiming(a, b []fitwatch.Step) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Duration != b[i].Duration || a[i].DurationValue != b[i].DurationValue || a[i].From != b[i].From || a[i].Repeat != b[i].Repeat {
+			return false
+		}
+	}
+	return true
 }
 
 // copySuffix finds a name's trailing copy number: "Tempo 2" is Tempo's second.
