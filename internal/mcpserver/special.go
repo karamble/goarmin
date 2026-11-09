@@ -53,18 +53,35 @@ func liveReadings(ctx context.Context, s *Server, c caller, t *Tool, args map[st
 		defer close(done)
 		s.opt.API.ServeAs(c.user, rec, r)
 	}()
+	// The read window starts with the first reading, not with the stream: through a sync node
+	// the stream opens as soon as the node is asked, about 10 s before the watch is linked.
 	open := time.NewTimer(liveOpen)
 	defer open.Stop()
-	select {
-	case <-rec.wrote:
-	case <-done:
-	case <-open.C:
-		cancel()
-		<-done
-		return nil, errors.New("the watch's live link did not open in time; the watch may be out of range")
-	case <-ctx.Done():
-		<-done
-		return nil, ctx.Err()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+wait:
+	for {
+		select {
+		case <-done:
+			break wait
+		case <-tick.C:
+			if b := rec.snapshot(); bytes.Contains(b, []byte("event: reading")) || bytes.Contains(b, []byte("event: end")) {
+				break wait
+			}
+		case <-open.C:
+			cancel()
+			<-done
+			if rec.code >= 400 {
+				return nil, apiError(rec)
+			}
+			if len(rec.snapshot()) > 0 {
+				return nil, fmt.Errorf("the watch's live link sent no values within %s; the watch may be out of range", liveOpen)
+			}
+			return nil, errors.New("the watch's live link did not open in time; the watch may be out of range")
+		case <-ctx.Done():
+			<-done
+			return nil, ctx.Err()
+		}
 	}
 	read := time.NewTimer(time.Duration(seconds) * time.Second)
 	defer read.Stop()

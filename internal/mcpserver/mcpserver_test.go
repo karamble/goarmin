@@ -203,6 +203,17 @@ func TestLiveReadings(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
 		fmt.Fprintf(w, "event: hello\ndata: {\"since\": 100}\n\n")
+		switch r.PathValue("id") {
+		case "5": // opened, but the watch sends nothing
+			<-r.Context().Done()
+			return
+		case "7": // a node: the stream opens long before the first value
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(1500 * time.Millisecond):
+			}
+		}
 		for i := 0; ; i++ {
 			select {
 			case <-r.Context().Done():
@@ -217,11 +228,15 @@ func TestLiveReadings(t *testing.T) {
 		}
 	})
 	cs := e.session(e.token("read"))
+	// The second of reading starts with the first value, 1.5 s after the stream opened.
 	text, ok := callText(t, cs, "get_live_readings", map[string]any{"id": 7, "seconds": 1})
 	var v map[string]any
 	_ = json.Unmarshal([]byte(text), &v)
-	if !ok || v["ended"] != "time_up" || len(v["readings"].([]any)) < 3 || v["latest"].(map[string]any)["heart_rate"] == nil {
+	if !ok || v["ended"] != "time_up" || len(v["readings"].([]any)) < 5 || v["latest"].(map[string]any)["heart_rate"] == nil {
 		t.Fatalf("live: %s", text)
+	}
+	if text, ok := callText(t, cs, "get_live_readings", map[string]any{"id": 5}); ok || !strings.Contains(text, "sent no values") {
+		t.Fatalf("a link without values: %s", text)
 	}
 	text, ok = callText(t, cs, "get_live_readings", map[string]any{"id": 6, "seconds": 5})
 	_ = json.Unmarshal([]byte(text), &v)
