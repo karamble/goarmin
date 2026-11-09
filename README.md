@@ -37,6 +37,9 @@ person in the household. No Garmin account, phone or cloud is needed.
 - **Import.** The Garmin Connect export (years of history in about a minute), a watch plugged in
   by USB (read-only, automatic), or any FIT files, folders and zips.
 - **At a glance.** A board of cards you arrange yourself.
+- **AI assistants.** goarmin speaks MCP: Claude or another assistant reads your data and, with
+  a token that allows it, plans workouts, syncs a watch or changes settings for you. Tokens are
+  made under Settings › MCP, read-only or with write access ([docs/mcp.md](docs/mcp.md)).
 - **Accounts.** Passkeys or passwords, by invitation. Everyone sees only their own data; admins
   don't see other people's health data either.
 
@@ -91,6 +94,7 @@ scales show up through the export.
 | [The data](docs/data.md) | What goarmin reads from FIT files and the export, and which source wins |
 | [Development](docs/development.md) | Build, test, change the code |
 | [API](docs/api.md) | The HTTP API |
+| [MCP](docs/mcp.md) | Connect an AI assistant |
 | [Protocol notes](docs/protocol/README.md) | How a Garmin watch talks over Bluetooth |
 
 ## Status
@@ -111,7 +115,8 @@ or endorsed by Garmin.
 ISC, see [LICENSE](LICENSE).
 
 The exercise figures use a body from Blender Studio's *Human Base Meshes* (CC0) and are drawn
-with three.js (MIT). Security issues: see [SECURITY.md](SECURITY.md).
+with three.js (MIT). The MCP server uses the official Go SDK, `modelcontextprotocol/go-sdk`
+(Apache-2.0, MIT). Security issues: see [SECURITY.md](SECURITY.md).
 
 ## Disclaimer
 

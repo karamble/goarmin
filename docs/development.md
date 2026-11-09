@@ -95,7 +95,10 @@ entry: each entry is one schema version, applied once in its own transaction.
 
 **An API route.** Register it in `internal/api` (`server.go` or the topic's file) behind
 `needUser`, taking the user from the session. Add an isolation test (another account gets 404),
-and document it in [api.md](api.md).
+and document it in [api.md](api.md). Then give it an MCP tool: a row in
+`internal/mcpserver/tools.go` (or a resource, for a file), or an entry in
+`mcpserver.Excluded` with the reason it stays out. `TestMCPCoversEveryRoute` fails until you do
+([mcp.md](mcp.md)).
 
 **A dashboard page or glance card.**
 - Pages are registered in `web/src/app/routes.tsx` (one registry for the rail, the tabs, the

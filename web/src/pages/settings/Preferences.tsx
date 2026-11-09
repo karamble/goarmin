@@ -2,34 +2,15 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, errorText } from '../../api/client'
 import { useMe } from '../../api/hooks/auth'
 import { useRecentActivities } from '../../api/hooks/data'
 import { usePrefs, useSavePrefs, type Prefs } from '../../api/hooks/prefs'
 import { useWatchProfile, useZones } from '../../api/hooks/training'
 import { zoneShares } from '../../lib/activity'
-import { Button, Card, Notice } from '../../ui/kit'
+import { Button, Card, Choice, Notice } from '../../ui/kit'
 import { useToast } from '../../ui/Toast'
-
-function Choice<T extends string>({ legend, value, options, onChange, hint }: {
-  legend: string; value: T; options: [T, string][]; onChange: (v: T) => void; hint?: ReactNode
-}) {
-  return (
-    <fieldset className="grid gap-2 border-0 p-0">
-      <legend className="field-label mb-2">{legend}</legend>
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={legend}>
-        {options.map(([v, label]) => (
-          <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
-            className={`rounded-full border px-4 py-2 text-sm ${value === v ? 'border-lime-dim bg-lime-fill text-lime' : 'border-border text-muted hover:text-text'}`}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {hint && <span className="text-[13px] text-faint">{hint}</span>}
-    </fieldset>
-  )
-}
 
 /** Preferences: week start, clock, intensity goal and heart-rate zones, each "as the watch"
  * unless the user chooses otherwise. */

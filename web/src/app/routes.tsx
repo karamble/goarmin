@@ -100,6 +100,7 @@ export const sections: SectionDef[] = [
       { path: 'profile', label: 'Profile', load: () => import('../pages/settings/Profile') },
       { path: 'security', label: 'Security', load: () => import('../pages/settings/Security') },
       { path: 'account', label: 'Account data', load: () => import('../pages/settings/AccountData') },
+      { path: 'mcp', label: 'MCP', title: 'MCP for AI assistants', load: () => import('../pages/settings/Mcp') },
       { path: 'admin', label: 'People', title: 'People & invites', requires: 'admin', load: () => import('../pages/settings/Admin') },
     ],
   },

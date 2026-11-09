@@ -20,6 +20,12 @@ you like.
   - passkeys use WebAuthn, bound to the configured public address.
 - **Isolation:** every data route is scoped to the signed-in account, and another account's ids
   answer 404. Admins manage accounts but see no one's health data.
+- **MCP** (`/mcp`, for AI assistants): bearer tokens each account makes under Settings › MCP,
+  stored as SHA-256 hashes, at three levels (read, write, admin). A call runs as the token's
+  account through the same routes and checks as the dashboard; credentials (sign-in, passwords,
+  passkeys, sessions, setup, invites, the tokens themselves) are not reachable through it.
+  Removals need the device's name, every token is rate-limited, and calls are logged by tool
+  name (never their arguments) for 30 days. `serve -no-mcp` turns it off.
 - **HTTP:**
   - same-origin writes only;
   - a strict Content Security Policy (`default-src 'self'`);

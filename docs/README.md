@@ -9,6 +9,7 @@
 | [data.md](data.md) | know what goarmin reads from FIT files and the Garmin Connect export, and which source wins |
 | [development.md](development.md) | build, test and change the code |
 | [api.md](api.md) | call the HTTP API |
+| [mcp.md](mcp.md) | connect an AI assistant (Claude and others) over MCP, with a token from Settings › MCP |
 | [figures.md](figures.md) | understand and change the 3D exercise figures (Blender) |
 | [protocol/](protocol/README.md) | read how a Garmin watch talks over Bluetooth, and what was verified on a Fenix 8 |
 | [research.md](research.md) | see the research notes from before the first line of code (history) |

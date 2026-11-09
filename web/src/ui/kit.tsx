@@ -72,3 +72,23 @@ export function Mark({ size = 30 }: { size?: number }) {
 export function Skeleton({ className = '' }: { className?: string }) {
   return <div aria-hidden className={`animate-pulse rounded-lg bg-panel2 ${className}`} />
 }
+
+/** Choice is a row of pill radio buttons. */
+export function Choice<T extends string>({ legend, value, options, onChange, hint }: {
+  legend: string; value: T; options: [T, string][]; onChange: (v: T) => void; hint?: ReactNode
+}) {
+  return (
+    <fieldset className="grid gap-2 border-0 p-0">
+      <legend className="field-label mb-2">{legend}</legend>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={legend}>
+        {options.map(([v, label]) => (
+          <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
+            className={`rounded-full border px-4 py-2 text-sm ${value === v ? 'border-lime-dim bg-lime-fill text-lime' : 'border-border text-muted hover:text-text'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {hint && <span className="text-[13px] text-faint">{hint}</span>}
+    </fieldset>
+  )
+}

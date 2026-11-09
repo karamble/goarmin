@@ -23,7 +23,7 @@ import (
 // personal records, gear and golf clubs, and a watch's solar charge, settings change log and
 // documents.
 
-func (s *Server) routesReaders(mux *http.ServeMux) {
+func (s *Server) routesReaders(mux *router) {
 	mux.HandleFunc("GET /api/files", s.needUser(s.files))
 	mux.HandleFunc("GET /api/files/{id}/messages", s.needUser(s.fileMessages))
 	mux.HandleFunc("GET /api/files/{id}/download", s.needUser(s.fileDownload))

@@ -33,7 +33,7 @@ const enrollTTL = 10 * time.Minute
 const syncInterval = 30 * time.Minute
 
 // routesNode registers the API sync nodes speak (nodeproto) and the dashboard's Sync nodes routes.
-func (s *Server) routesNode(mux *http.ServeMux) {
+func (s *Server) routesNode(mux *router) {
 	if s.opt.Nodes == nil {
 		return
 	}

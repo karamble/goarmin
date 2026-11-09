@@ -36,6 +36,7 @@ commands:
   user      list the accounts, or set an account's password (-set-password)
   backup    write a backup archive (consistent while the server runs)
   healthcheck  exit 0 if the server here answers /healthz (container health checks)
+  mcp       serve a goarmin server's MCP tools on stdio, for AI assistants (GOARMIN_MCP_TOKEN)
   activities  list the activities of an account
   version   print the version
   help      show this help
@@ -81,6 +82,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runBackup(args[1:], stdout, stderr)
 	case "healthcheck":
 		return runHealthcheck(args[1:], stdout, stderr)
+	case "mcp":
+		return runMCP(args[1:], stdout, stderr)
 	case "version", "-version", "--version":
 		fmt.Fprintln(stdout, versionString())
 		return 0

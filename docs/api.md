@@ -105,6 +105,20 @@ https URL makes the cookies `Secure`.
 | `GET /api/invites/{token}`, `POST /api/invites/{token}/accept` `{email, name, password}` | |
 | `GET /api/admin/users` | |
 
+## MCP
+
+The MCP endpoint for AI assistants and the routes behind Settings › MCP. The token routes take
+a signed-in browser session only, so an assistant cannot make itself tokens. How MCP works:
+[mcp.md](mcp.md).
+
+| Route | |
+|---|---|
+| `POST/GET/DELETE /mcp` | the MCP endpoint (Streamable HTTP) with `Authorization: Bearer gma_…`; 401 for a missing, revoked or expired token, or an admin token whose account is no longer an admin; 404 when the server runs with `-no-mcp` |
+| `GET /api/me/mcp` | `{enabled, endpoint, secure, tokens: […], calls: […], scopes, catalogue: […], retention_days, limits: {calls_per_minute, destructive_per_minute}}`: the account's tokens (`{id, name, prefix, scope, created_at, expires_at, last_used_at, revoked_at, live, calls_24h}`), its last 50 calls (`{id, token_id, token, at, tool, ok, ms, error}`), the levels it may give a token, and everything MCP offers (`{kind, name, title, description, area, level, destructive, read_only, uri, route}`) |
+| `POST /api/me/mcp/tokens` | `{name, scope: read\|write\|admin, expires_days: 30\|90\|365\|0}` → 201 `{token, item}`; the token is shown only here. `admin` is for admins (403 otherwise); at most 50 live tokens (409); 409 with MCP off |
+| `PATCH /api/me/mcp/tokens/{id}` | `{name}` → 204 |
+| `DELETE /api/me/mcp/tokens/{id}` | revokes it at once → 204 |
+
 ## Health data (the signed-in user's own)
 
 | Route | |

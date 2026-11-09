@@ -853,4 +853,35 @@ CREATE TABLE workout_plans (
 );
 CREATE INDEX workout_plans_user_day ON workout_plans(user_id, day);
 `,
+	// 19: MCP. Each account makes bearer tokens for AI assistants (Settings › MCP); only a
+	// token's hash is kept. scope is read, write or admin. mcp_calls logs each tool call by
+	// name (never its arguments) for 30 days.
+	`
+CREATE TABLE mcp_tokens (
+	id INTEGER PRIMARY KEY,
+	user_id INTEGER NOT NULL REFERENCES users(id),
+	name TEXT NOT NULL,
+	prefix TEXT NOT NULL,                       -- the token's first characters, to tell tokens apart
+	token_hash TEXT NOT NULL UNIQUE,
+	scope TEXT NOT NULL,                        -- read, write, admin
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER,                         -- NULL: never
+	last_used_at INTEGER,
+	revoked_at INTEGER
+);
+CREATE INDEX mcp_tokens_user ON mcp_tokens(user_id);
+
+CREATE TABLE mcp_calls (
+	id INTEGER PRIMARY KEY,
+	token_id INTEGER NOT NULL REFERENCES mcp_tokens(id),
+	user_id INTEGER NOT NULL,
+	at INTEGER NOT NULL,
+	tool TEXT NOT NULL,                         -- tool name, resource:… or prompt:…
+	ok INTEGER NOT NULL,
+	ms INTEGER NOT NULL,
+	error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX mcp_calls_user_at ON mcp_calls(user_id, at);
+CREATE INDEX mcp_calls_at ON mcp_calls(at);
+`,
 }

@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/karamble/goarmin/internal/api"
@@ -41,6 +42,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fakePairer := fs.Bool("fake-pairer", false, "development: scripted Bluetooth with made-up watches, for trying Add a watch (with -with-sync, never on the default data directory)")
 	noUSB := fs.Bool("no-usb", false, "do not look for watches plugged in by USB (imports of uploaded files still work)")
 	importMaxGB := fs.Int("import-max-gb", 0, "largest upload in GB (default 8, or GOARMIN_IMPORT_MAX_GB)")
+	noMCP := fs.Bool("no-mcp", false, "turn the MCP endpoint /mcp (for AI assistants, with tokens made under Settings › MCP) off; GOARMIN_MCP=0 does the same")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -67,6 +69,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "goarmin serve:", err)
 		return 2
+	}
+	mcpOn, err := config.Bool("GOARMIN_MCP", true)
+	if err != nil {
+		fmt.Fprintln(stderr, "goarmin serve:", err)
+		return 2
+	}
+	if !mcpOn {
+		*noMCP = true
 	}
 	if *public == "" {
 		_, port, err := net.SplitHostPort(*listen)
@@ -103,7 +113,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "First run: create the admin account at\n  %s/setup?token=%s\n(the token is valid until this process ends)\n", *public, setupToken)
 	}
 	opt := api.Options{Store: in.Store, Blobs: in.Blobs, PublicURL: *public, SetupToken: setupToken, UI: ui, Logger: log,
-		Version: version}
+		Version: version, NoMCP: *noMCP}
+	if *noMCP {
+		log.Info("mcp off (-no-mcp)")
+	} else {
+		log.Info("mcp on", "endpoint", strings.TrimSuffix(*public, "/")+"/mcp")
+	}
 	switch tc, err := tiles.New(tiles.Options{DataDir: *dataDir, Upstream: *tileURL, Token: config.String("GOARMIN_TILE_TOKEN", ""),
 		Dark: config.String("GOARMIN_TILE_DARK", ""), Attribution: config.String("GOARMIN_TILE_ATTRIBUTION", ""), Logger: log}); {
 	case errors.Is(err, tiles.ErrNoUpstream):

@@ -174,6 +174,15 @@ stateDiagram-v2
 - **Security.** Password, passkeys, signed-in sessions.
 - **Account data.** What the Garmin Connect export held about your account (profile, settings,
   goals, device registrations and more), readable.
+- **MCP.** Tokens for AI assistants such as Claude, so they can read your data and, if the
+  token allows it, act for you ([mcp.md](mcp.md)):
+  - the endpoint to give the assistant, with Copy;
+  - **New token:** a name, the access (Read; Read and write; Admin for admins) and when it
+    expires. The token is shown once, with ready snippets for Claude Code, other clients and
+    the stdio bridge;
+  - your tokens, with when each was used and how often in the last day; Rename and Revoke;
+  - recent calls (the tool, never what was sent), kept 30 days;
+  - everything MCP offers, by area, for each access level.
 - **People** (admins). Accounts and invitations, every device on the server with its owner and
   sync state. Admins can release a device or add a watch for someone else, but never see their
   health data.

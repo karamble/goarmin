@@ -67,6 +67,7 @@ flowchart LR
   - `nodehub` is the sync role: schedule, Bluetooth lane, live links, pairing sessions.
   - `syncnode` is one sync, plus the spool.
   - `api` serves HTTP; `webui` is the embedded dashboard.
+  - `mcpserver` is the MCP server for AI assistants: a table of tools over the API's routes.
   - `figures` holds the exercise figures' catalogue and poses, built into the binary.
   - `tiles` mounts the tile cache; `backup` writes archives; `usbsource` finds watches on USB;
     `config` reads settings.
@@ -355,6 +356,34 @@ flowchart LR
   `internal/webui/dist`, which is embedded in the binary. Only the dashboard's own routes get
   `index.html`.
 - [api.md](api.md) lists every route.
+
+## MCP
+
+An MCP server for AI assistants sits beside the API at `/mcp` (Streamable HTTP, the official Go
+SDK).
+
+```mermaid
+flowchart LR
+    A[Assistant] -->|Bearer token| M["/mcp<br/>token check, level, limits"]
+    B["goarmin mcp<br/>(stdio bridge)"] -->|Bearer token| M
+    M --> T["tool table<br/>(internal/mcpserver)"]
+    T -->|in-process request<br/>as the token's account| H[API handlers]
+    H --> S[(store)]
+    M -.->|tool name, result, time| L[(call log)]
+```
+
+- **One surface.** Each tool is a row naming an API route. A call becomes an in-process request
+  to that route's handler with the token's account in the request context (`ServeAs`), so an
+  assistant gets exactly what the dashboard does, with its validation, ownership and privacy
+  rules.
+- **Complete by test.** A test walks every registered route: each must be a tool or resource,
+  or left out with a reason (credentials, the node API, liveness checks).
+- **Tokens** are per account, stored as SHA-256, at three levels. Each level has its own MCP
+  server, so a read token never lists a write tool; each call checks the level again.
+  Sessions are bound to the token.
+- **Removals** need the device's name in `confirm`; limits are 120 calls and 10 removals a
+  minute per token; the log keeps tool names (never arguments) for 30 days.
+- Details: [mcp.md](mcp.md).
 
 ## Exercise figures
 

@@ -1006,3 +1006,60 @@ export interface Calendar {
   days: CalendarDay[]
 }
 
+
+/** MCP: tokens for AI assistants (Settings › MCP). */
+export type McpScope = 'read' | 'write' | 'admin'
+
+export interface McpToken {
+  id: number
+  name: string
+  prefix: string
+  scope: McpScope
+  created_at: number
+  expires_at: number | null
+  last_used_at: number | null
+  revoked_at: number | null
+  live: boolean
+  calls_24h: number
+}
+
+export interface McpCall {
+  id: number
+  token_id: number
+  token: string
+  at: number
+  tool: string
+  ok: boolean
+  ms: number
+  error: string
+}
+
+export interface McpItem {
+  kind: 'tool' | 'resource' | 'prompt'
+  name: string
+  title: string
+  description: string
+  area: string
+  level: McpScope
+  destructive?: boolean
+  read_only?: boolean
+  uri?: string
+  route?: string
+}
+
+export interface McpOverview {
+  enabled: boolean
+  endpoint: string
+  secure: boolean
+  tokens: McpToken[]
+  calls: McpCall[]
+  scopes: McpScope[]
+  catalogue: McpItem[]
+  retention_days: number
+  limits: { calls_per_minute: number; destructive_per_minute: number }
+}
+
+export interface McpCreated {
+  token: string
+  item: McpToken
+}

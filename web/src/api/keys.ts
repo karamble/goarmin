@@ -11,6 +11,7 @@ export const keys = {
   setup: ['setup'] as const,
   sessions: ['me', 'sessions'] as const,
   passkeys: ['me', 'passkeys'] as const,
+  mcp: ['me', 'mcp'] as const,
   setting: (key: string) => ['me', 'settings', key] as const,
   invite: (token: string) => ['invite', token] as const,
   users: ['admin', 'users'] as const,

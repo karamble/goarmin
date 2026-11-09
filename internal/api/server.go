@@ -24,6 +24,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/karamble/goarmin/internal/importer"
+	"github.com/karamble/goarmin/internal/mcpserver"
 	"github.com/karamble/goarmin/internal/nodes"
 	"github.com/karamble/goarmin/internal/store"
 	"github.com/karamble/goarmin/pkg/auth"
@@ -70,7 +71,9 @@ type Options struct {
 	// ImportMax and ImportMaxFiles bound one upload (8 GiB, 100,000 files).
 	ImportMax      int64
 	ImportMaxFiles int
-	Logger         *slog.Logger
+	// NoMCP turns the MCP endpoint (/mcp, for AI assistants) off.
+	NoMCP  bool
+	Logger *slog.Logger
 }
 
 // Server is the API.
@@ -83,6 +86,8 @@ type Server struct {
 	wa     *webauthn.WebAuthn
 	login  *auth.Limiter // per address and account
 	ipOnly *auth.Limiter // per address
+	mux    *router
+	mcp    *mcpserver.Server // nil with NoMCP
 
 	mu         sync.Mutex
 	ceremonies map[string]ceremony
@@ -105,22 +110,62 @@ func New(opt Options) (*Server, error) {
 	if opt.Logger == nil {
 		opt.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Server{opt: opt, st: opt.Store, blobs: opt.Blobs, log: opt.Logger, public: u, wa: wa,
+	s := &Server{opt: opt, st: opt.Store, blobs: opt.Blobs, log: opt.Logger, public: u, wa: wa,
 		login: auth.NewLimiter(10, 15*time.Minute), ipOnly: auth.NewLimiter(50, 15*time.Minute),
-		ceremonies: map[string]ceremony{}}, nil
-}
-
-// Handler returns the whole site: /api routes and, for everything else, the UI.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	s.routes(mux)
-	if s.opt.UI != nil {
-		mux.Handle("/", s.opt.UI)
+		ceremonies: map[string]ceremony{}}
+	if !opt.NoMCP {
+		if s.mcp, err = mcpserver.New(mcpserver.Options{Store: opt.Store, API: s, PublicURL: opt.PublicURL, Version: opt.Version,
+			Logger: opt.Logger}); err != nil {
+			return nil, err
+		}
 	}
-	return securityHeaders(gzipped(s.withSession(mux)))
+	s.mux = &router{ServeMux: http.NewServeMux()}
+	s.routes(s.mux)
+	if s.opt.UI != nil {
+		s.mux.Handle("/", s.opt.UI)
+	}
+	return s, nil
 }
 
-func (s *Server) routes(mux *http.ServeMux) {
+// Handler returns the whole site: /api routes, /mcp and, for everything else, the UI.
+func (s *Server) Handler() http.Handler {
+	return securityHeaders(gzipped(s.withSession(s.mux)))
+}
+
+// router is the API's ServeMux; it remembers every pattern, so a test can check that MCP
+// offers each route (or leaves it out on purpose).
+type router struct {
+	*http.ServeMux
+	patterns []string
+}
+
+func (r *router) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	r.patterns = append(r.patterns, pattern)
+	r.ServeMux.HandleFunc(pattern, h)
+}
+
+func (r *router) Handle(pattern string, h http.Handler) {
+	r.patterns = append(r.patterns, pattern)
+	r.ServeMux.Handle(pattern, h)
+}
+
+// Routes lists every route pattern the server registered.
+func (s *Server) Routes() []string { return append([]string(nil), s.mux.patterns...) }
+
+// ServeAs serves an API request as the signed-in user u, the way the dashboard's own request
+// would be served: MCP tools call the API this way. Routes MCP leaves out (credentials, the
+// node API) answer 404, whoever asks.
+func (s *Server) ServeAs(u store.User, w http.ResponseWriter, r *http.Request) {
+	if _, pattern := s.mux.Handler(r); pattern != "/api/" {
+		if _, left := mcpserver.Excluded[pattern]; left || !strings.HasPrefix(r.URL.Path, "/api/") {
+			writeError(w, http.StatusNotFound, "this route is not available through MCP")
+			return
+		}
+	}
+	s.mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+}
+
+func (s *Server) routes(mux *router) {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"ok": true}) })
 	// /healthz is for container health checks and uptime probes: no session needed, no database
 	// touched, a constant body, and never logged.
@@ -221,6 +266,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bluetooth/power", s.needUser(s.bluetoothPower))
 	s.routesReaders(mux)
 	s.routesNode(mux)
+	s.routesMCP(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "no such API route") })
 }
 

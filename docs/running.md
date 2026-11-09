@@ -232,6 +232,9 @@ lists the flags with their defaults.
 | `GOARMIN_TILE_TOKEN` | serve | The token for `{token}`; never logged |
 | `GOARMIN_TILE_DARK`, `GOARMIN_TILE_ATTRIBUTION` | serve | For a style that isn't a preset: already dark or not, and its credit line |
 | `GOARMIN_IMPORT_MAX_GB` | serve | The largest upload (8) |
+| `GOARMIN_MCP` | serve | `0` turns the MCP endpoint `/mcp` off (as `-no-mcp`) |
+| `GOARMIN_MCP_TOKEN` | mcp | The MCP token from Settings › MCP (never a flag) |
+| `GOARMIN_MCP_SERVER` | mcp | The goarmin server the stdio bridge connects to (as `-server`) |
 | `GOARMIN_ADAPTER` | serve, pair, sync, probe, live | The Bluetooth adapter (`hci0`) |
 | `GOARMIN_DEVICE` | sync, probe, live | The watch's address, when there is more than one |
 | `GOARMIN_FEATURES` | serve | `0` stops goarmin from telling the watch which features it supports |
@@ -246,6 +249,7 @@ The main flags of `serve`:
 | `-with-sync` | Also run the sync role: scheduled syncs, live values, pairing |
 | `-sync-interval 30m` | Time between scheduled syncs |
 | `-no-usb` | Don't look for watches plugged in by USB |
+| `-no-mcp` | Turn the MCP endpoint for AI assistants off ([mcp.md](mcp.md)) |
 | `-v` | Log request errors in detail |
 | `-fake-pairer` | Development only: made-up watches for trying *Add a watch* (scratch data only) |
 
@@ -265,6 +269,7 @@ The main flags of `serve`:
 | `user` | List accounts; `-email E -set-password < file` sets a password from standard input |
 | `days`, `activities` | Print an account's daily summaries or activities |
 | `healthcheck` | Exit 0 if the server here answers `/healthz` |
+| `mcp -server URL` | The MCP stdio bridge for AI assistants that start local commands; the token comes from `GOARMIN_MCP_TOKEN`; `-list` prints what the server offers ([mcp.md](mcp.md)) |
 | `version` | Print the version |
 
 The CLI and the server share locks: a command that needs Bluetooth or USB waits for, or refuses
