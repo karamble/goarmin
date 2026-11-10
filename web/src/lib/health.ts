@@ -53,6 +53,25 @@ export function hourlyTotals(s: { t: number[]; v: number[]; from: number; to: nu
   return out
 }
 
+/** floorMM is one floor as a Garmin watch counts it: 10 ft (3.048 m) climbed. */
+export const floorMM = 3048
+
+/** hourlyFloors spreads a day's climb (an ascent series: metres per interval) over its hours as
+ * whole floors, the way the watch counts them: an hour gets the floors its climb completes, so
+ * the hours add up to the day's floors. */
+export function hourlyFloors(s: { t: number[]; v: (number | null)[]; from: number; to: number }): number[] {
+  const hours = Math.max(1, Math.round((s.to - s.from) / 3600))
+  const out = new Array<number>(hours).fill(0)
+  let mm = 0
+  s.t.forEach((t, i) => {
+    const before = Math.floor(mm / floorMM)
+    mm += Math.round((s.v[i] ?? 0) * 1000)
+    const h = Math.floor((t - s.from) / 3600)
+    if (h >= 0 && h < hours) out[h] += Math.floor(mm / floorMM) - before
+  })
+  return out
+}
+
 /** chargeDrain sums the rises and the falls of a Body Battery series. */
 export function chargeDrain(v: (number | null)[]): { charged: number; drained: number } {
   let charged = 0

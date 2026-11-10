@@ -91,7 +91,7 @@ var Tools = []Tool{
 	{Name: "list_metrics", Title: "Metrics", Area: "Health", Level: Read, Method: "GET", Path: "/api/metrics", ReadOnly: true,
 		Desc: "Every metric goarmin stores, with its unit and scale: the names get_series takes (daily ones are in get_daily)."},
 	{Name: "get_daily", Title: "Daily summaries", Area: "Health", Level: Read, Method: "GET", Path: "/api/daily", ReadOnly: true,
-		Desc: "One summary per local day: steps, distance, calories, heart rate, stress, Body Battery, sleep, intensity minutes, HRV and every daily value (training readiness, load, VO2 max, …).",
+		Desc: "One summary per local day: steps, floors (climbed and descended, with the goal), distance, calories, heart rate, stress, Body Battery, sleep, intensity minutes, HRV and every daily value (training readiness, load, VO2 max, …).",
 		Args: days("3660")},
 	{Name: "get_series", Title: "Time series", Area: "Health", Level: Read, Method: "GET", Path: "/api/series/{metric}", ReadOnly: true,
 		Desc: "A metric over time (heart rate, stress, Body Battery, respiration, SpO2, steps, …), bucketed to at most max_points; t is Unix seconds, v the values, min/max when bucketed.",

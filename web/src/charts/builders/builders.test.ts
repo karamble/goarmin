@@ -91,6 +91,12 @@ describe('dailyBars', () => {
   it('has no lime without a focus', () => {
     expect(limeCount(dailyBars({ labels: ['a'], v: [1] }, ctx))).toBe(0)
   })
+
+  it('steps the axis by whole numbers when asked (floors)', () => {
+    const axis = (o: unknown) => (o as { yAxis: { minInterval?: number } }).yAxis.minInterval
+    expect(axis(dailyBars({ labels: ['a', 'b'], v: [1, 2], whole: true }, ctx))).toBe(1)
+    expect(axis(dailyBars({ labels: ['a', 'b'], v: [1, 2] }, ctx))).toBeUndefined()
+  })
 })
 
 describe('dayTimeline', () => {

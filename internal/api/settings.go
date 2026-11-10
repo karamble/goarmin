@@ -52,7 +52,7 @@ type Prefs struct {
 }
 
 // calendarKinds are the kinds a calendar day can show, which prefs may hide.
-var calendarKinds = []string{kindActivity, kindPlan, kindSteps, kindSleep, kindHRV, kindNap, kindHeart, kindECG, kindStress,
+var calendarKinds = []string{kindActivity, kindPlan, kindSteps, kindFloors, kindSleep, kindHRV, kindNap, kindHeart, kindECG, kindStress,
 	kindBodyBattery, kindWeighIn, kindDrink}
 
 // PrefsZones chooses the heart-rate zones: the watch's (default), custom (a maximum, with five

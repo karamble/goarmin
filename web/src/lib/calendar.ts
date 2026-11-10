@@ -32,6 +32,7 @@ export const kinds: [CalendarKind, KindInfo][] = [
   ['activity', { label: 'Activities', tone: 'var(--lime)' }],
   ['plan', { label: 'Planned workouts', tone: 'var(--lime)' }],
   ['steps', { label: 'Steps', tone: 'var(--lime-dim)' }],
+  ['floors', { label: 'Floors', tone: 'var(--lime-dim)' }],
   ['sleep', { label: 'Sleep', tone: 'var(--cyan)' }],
   ['hrv', { label: 'HRV', tone: 'var(--cyan)' }],
   ['nap', { label: 'Naps', tone: 'var(--cyan)' }],
@@ -112,6 +113,9 @@ export function dayEntries(d: CalendarDay, hidden: Set<CalendarKind>, units: Uni
   const steps = s?.steps ?? 0
   const goal = v.step_goal ?? 0
   add('steps', `${int(steps)} steps`, { faint: goal > 0 && steps < goal })
+  const floors = s?.floors_up ?? 0
+  const floorsGoal = s?.floors_goal ?? 0
+  add('floors', `${int(floors)} floor${floors === 1 ? '' : 's'}`, { faint: floorsGoal > 0 && floors < floorsGoal })
   add('sleep', s?.sleep_score != null ? `Sleep ${s.sleep_score}` : s?.sleep_s ? `Sleep ${hm(s.sleep_s)}` : 'Sleep')
   const hrv = hrvOf(s).value
   add('hrv', hrv != null ? `HRV ${Math.round(hrv)} ms` : 'HRV')

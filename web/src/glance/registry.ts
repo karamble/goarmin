@@ -30,7 +30,7 @@ export const cards: CardDef[] = [
   def({ type: 'your-day', title: 'Your day', description: 'Heart rate, stress and Body Battery on one timeline', icon: LineChart,
     category: 'health', sizes: ['L', 'W'], defaultSize: 'W', defaultOptions: {}, singleton: true, to: '/health/energy',
     load: () => import('./cards/YourDay') }),
-  def({ type: 'steps', title: 'Steps', description: 'Steps against your goal', icon: Footprints,
+  def({ type: 'steps', title: 'Steps', description: 'Steps and floors against your goals', icon: Footprints,
     category: 'health', sizes: ['S', 'M', 'L'], defaultSize: 'S', defaultOptions: {}, to: '/health/movement',
     load: () => import('./cards/Steps') }),
   def({ type: 'resting-hr', title: 'Resting HR', description: 'Resting heart rate and its trend', icon: HeartPulse,

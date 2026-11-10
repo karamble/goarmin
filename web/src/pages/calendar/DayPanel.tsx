@@ -204,6 +204,9 @@ function Details({ day, cd, today }: { day: string; cd?: CalendarDay; today: str
   const steps = s?.steps ?? 0
   const goal = v.step_goal ?? 0
   push('Steps', steps > 0 && `${int(steps)}${goal ? ` · ${Math.round((steps / goal) * 100)} % of goal` : ''}`, '/health/movement')
+  const floors = s?.floors_up ?? 0
+  push('Floors', floors > 0 && [s?.floors_goal ? `${int(floors)} of ${int(s.floors_goal)}` : `${int(floors)} up`,
+    s?.floors_down ? `${int(s.floors_down)} down` : ''].filter(Boolean).join(' · '), '/health/movement')
   push('Sleep', (s?.sleep_score != null || s?.sleep_s) && [s?.sleep_score != null ? `Score ${s.sleep_score}` : '', s?.sleep_s ? hm(s.sleep_s) : ''].filter(Boolean).join(' · '), '/health/sleep')
   push('Sleep need', v.sleep_need != null && hm(v.sleep_need * 60), '/health/sleep')
   const hrv = hrvOf(s)

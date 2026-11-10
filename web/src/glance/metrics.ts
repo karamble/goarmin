@@ -19,6 +19,7 @@ const miles = 1609.344
 
 export const dailyMetrics: DailyMetric[] = [
   { key: 'steps', label: 'Steps', unit: fixed('steps'), digits: 0, get: (d) => d.steps },
+  { key: 'floors', label: 'Floors climbed', unit: fixed('floors'), digits: 0, get: (d) => d.floors_up },
   { key: 'resting_hr', label: 'Resting HR', unit: fixed('bpm'), digits: 0, get: (d) => d.values.resting_hr ?? d.resting_hr },
   { key: 'sleep_score', label: 'Sleep score', unit: fixed(''), digits: 0, get: (d) => d.sleep_score },
   { key: 'sleep', label: 'Sleep', unit: fixed('h'), digits: 1, get: (d) => (d.sleep_s == null ? null : d.sleep_s / 3600) },

@@ -35,9 +35,9 @@ function Page({ children }: { children: ReactNode }) {
 const days: CalendarDay[] = [
   {
     day: yesterday,
-    summary: { day: yesterday, steps: 7305, values: { step_goal: 6000, weight: 75.2 }, sleep_score: 79, sleep_s: 23160, resting_hr: 59, hr_max: 141,
+    summary: { day: yesterday, steps: 7305, floors_up: 12, floors_down: 3, floors_goal: 10, values: { step_goal: 6000, weight: 75.2 }, sleep_score: 79, sleep_s: 23160, resting_hr: 59, hr_max: 141,
       stress_avg: 24, body_battery_min: 17, body_battery_max: 77 },
-    kinds: { activity: 1, plan: 1, steps: 1, sleep: 1, heart: 1, stress: 1, body_battery: 1, weigh_in: 1 },
+    kinds: { activity: 1, plan: 1, steps: 1, floors: 1, sleep: 1, heart: 1, stress: 1, body_battery: 1, weigh_in: 1 },
     activities: [{ id: 3, name: 'Morning', start: now - 86400, end: now - 86400 + 1800, sport: 'running', sub_sport: 'generic', sport_label: 'Run',
       timer_s: 1800, distance_m: 5200, workout: 'Tempo' }],
     coach: [],
@@ -93,10 +93,12 @@ describe('Calendar', () => {
     renderWith(<Page><CalendarPage /></Page>, { path: `/calendar?d=${yesterday}` })
     const cell = await screen.findByRole('button', { name: new RegExp(`^${new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${yesterday}T00:00:00Z`))}`) })
     expect(cell.getAttribute('aria-current')).toBe('date')
-    await waitFor(() => expect(cell.getAttribute('aria-label')).toMatch(/Run 5\.20 km, Tempo done, 7,305 steps, Sleep 79/))
+    await waitFor(() => expect(cell.getAttribute('aria-label')).toMatch(/Run 5\.20 km, Tempo done, 7,305 steps, 12 floors, Sleep 79/))
     const panel = screen.getByRole('region', { name: /^Day: / })
     expect(within(panel).getByText('Steps').closest('a')!.getAttribute('href')).toBe(`/health/movement?d=${yesterday}`)
     expect(within(panel).getByText(/7,305 · 122 % of goal/)).toBeTruthy()
+    expect(within(panel).getByText('12 of 10 · 3 down')).toBeTruthy()
+    expect(within(panel).getByText('Floors').closest('a')!.getAttribute('href')).toBe(`/health/movement?d=${yesterday}`)
     expect(within(panel).getByText('Resting 59 bpm · max 141 bpm')).toBeTruthy()
     expect(within(panel).getByRole('link', { name: 'Tempo' }).getAttribute('href')).toBe('/training/workouts/4')
     expect(within(panel).getByText('Done')).toBeTruthy()

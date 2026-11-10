@@ -42,16 +42,17 @@ The days by month (or by week, as an agenda), with what you recorded and what yo
 
 - **A day's bars:** one short bar per kind of data, in goarmin's colours: activities (lime, one
   each), planned workouts (hatched: Garmin Coach's and your own, ✓ once done, faint when missed),
-  steps (faint below the goal), sleep, HRV and naps (cyan), heart rate and ECG (pink), stress and
-  Body Battery (amber), weigh-ins and drinks (grey). On a wide screen a day names its activities
-  and plans and gives each bar its number ("Sleep 79", "7,305 steps"); "+n" counts what doesn't
-  fit.
+  steps and floors (faint below their goals), sleep, HRV and naps (cyan), heart rate and ECG
+  (pink), stress and Body Battery (amber), weigh-ins and drinks (grey). On a wide screen a day
+  names its activities and plans and gives each bar its number ("Sleep 79", "7,305 steps",
+  "9 floors"); "+n" counts what doesn't fit.
 - **Show** in the header hides kinds you don't want; the choice is saved to your account.
 - **A day** opens beside the month (a sheet on a phone): its timeline (heart rate, stress, Body
   Battery, sleep and activities), what was planned, its activities, and a line per value
-  recorded (steps against the goal, sleep and sleep need, HRV, heart rate, stress, Body Battery
-  charged and drained, breathing, intensity minutes, calories, weight, drinks, ECG, naps), each
-  opening its page for that day. ◀ ▶ move day by day; arrow keys move through the grid.
+  recorded (steps against the goal, floors climbed against theirs and floors down, sleep and
+  sleep need, HRV, heart rate, stress, Body Battery charged and drained, breathing, intensity
+  minutes, calories, weight, drinks, ECG, naps), each opening its page for that day. ◀ ▶ move
+  day by day; arrow keys move through the grid.
 - **Your own plans:** *Plan a workout* on a day (or *Plan* on a workout's page, or the palette)
   puts a workout of your library on a day. A plan counts as done when you record an activity
   that day that followed that workout (else one of its sport); it is missed once the day is past.
@@ -71,7 +72,7 @@ the same numbers.
 | **Heart** | All-day heart rate with its range, resting heart rate, activities shaded; ECG recordings with their waveform | Daily ranges with resting heart rate |
 | **Energy** (Stress & Body Battery) | Body Battery and stress on one axis, charged and drained, time in each stress level | Daily ranges, a calendar of stress |
 | **Breathing** | Respiration and overnight SpO2 | Daily averages |
-| **Movement** | Steps per hour against your goal, distance, ascent, active calories, intensity minutes | Daily steps against the goal, a calendar |
+| **Movement** | Steps and floors against their goals, both by the hour; distance, ascent (with the floors down), active calories, intensity minutes | Daily steps and floors against their goals, and the days each goal was reached; for a year, a calendar of each |
 | **Body** | The last weigh-in (weight, body fat, BMI, muscle, bone, water), skin temperature, hydration, fitness age | Weight and body fat over time, nightly skin temperature, hydration |
 
 ## Training

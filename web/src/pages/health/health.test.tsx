@@ -129,7 +129,7 @@ describe('health pages', () => {
 
   it('Breathing and Movement over a week', async () => {
     const days = [0, 1, 2].map((i) => dayRow(addDays(pastWeek, i), { respiration_avg: 14 + i / 10, spo2_avg: 95, steps: 8000 + i * 1000, distance_m: 6000,
-      values: { step_goal: 8500 } }))
+      floors_up: 8 + i, floors_goal: 9, values: { step_goal: 8500 } }))
     stubApi({ '/api/daily': json(days) })
     const { unmount } = show(<Breathing />, `/health/breathing?d=${pastWeek}&p=week`)
     await img(/^Daily respiration: minimum 14.0/)
@@ -138,17 +138,23 @@ describe('health pages', () => {
     show(<Movement />, `/health/movement?d=${pastWeek}&p=week`)
     await img(/^Daily steps: minimum 8000, maximum 10000/)
     expect(screen.getByText('Goal reached')).toBeTruthy()
+    await img(/^Daily floors climbed: minimum 8, maximum 10/)
+    expect(screen.getByText('Floors goal reached').nextElementSibling!.textContent).toBe('2')
   })
 
   it('Movement: steps by hour and the goal ring', async () => {
     const start = Math.floor(Date.now() / 1000) - 5 * 3600
     stubApi({
       '/api/series/steps': json({ ...series('steps', [100, 200, 300], 1800, start), from: start, to: start + 24 * 3600, total: true }),
-      '/api/daily': json([dayRow(day, { steps: 600, distance_m: 450, values: { step_goal: 8000 } })]),
+      '/api/series/ascent': json({ ...series('ascent', [3.048, 2.5, 3.6], 1800, start), from: start, to: start + 24 * 3600, total: true }),
+      '/api/daily': json([dayRow(day, { steps: 600, distance_m: 450, ascent_m: 9.148, floors_up: 3, floors_down: 1, floors_goal: 10, values: { step_goal: 8000 } })]),
     })
     show(<Movement />, '/health/movement')
     await img(/^600 steps of 8,000$/)
     await img(/^Steps per hour: minimum 0, maximum 300/)
+    await img(/^3 floors climbed of 10$/)
+    await img(/^Floors climbed per hour: minimum 0, maximum 2/)
+    expect(screen.getByText('1 floor down')).toBeTruthy()
   })
 
   it('opens a clicked day in the Day view, Back returns to the week', async () => {

@@ -17,6 +17,8 @@ export default function Steps({ day, size, isToday }: CardProps) {
   const steps = d?.steps ?? null
   const goal = d?.values.step_goal ?? null
   const pct = steps != null && goal ? Math.round((steps / goal) * 100) : null
+  const floors = d?.floors_up ?? null
+  const floorsGoal = d?.floors_goal ?? null
   const ring = (px: number) => (
     <Ring value={steps ?? 0} max={goal ?? Math.max(steps ?? 0, 1)} size={px} stroke={px > 100 ? 9 : 7} label={`${n(steps)} steps${goal ? ` of ${n(goal)}` : ''}`}>
       <span className={`num leading-none ${px > 100 ? 'text-[22px]' : 'text-[15px]'}`}>{pct != null ? `${pct}%` : '–'}</span>
@@ -35,8 +37,12 @@ export default function Steps({ day, size, isToday }: CardProps) {
             {ring(size === 'L' ? 150 : 124)}
             <dl className="m-0 grid gap-4">
               <Kpi value={n(steps)} unit="steps">{goal ? `goal ${n(goal)}` : ''}</Kpi>
+              {floors != null && (
+                <Stat label="Floors" value={n(floors)} unit={floorsGoal ? `of ${n(floorsGoal)}` : undefined}
+                  tone={floorsGoal && floors >= floorsGoal ? 'lime' : undefined} />
+              )}
               <Stat label="Distance" value={distance(d?.distance_m, units)} />
-              <Stat label="Active" value={n(d?.active_kcal)} unit="kcal" />
+              {size === 'L' && <Stat label="Active" value={n(d?.active_kcal)} unit="kcal" />}
             </dl>
           </div>
         )

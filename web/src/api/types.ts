@@ -63,6 +63,11 @@ export interface Day {
   active_kcal?: number | null
   ascent_m?: number | null
   descent_m?: number | null
+  /** Whole floors climbed and descended (10 ft, 3.048 m, each), as the watch counts them. */
+  floors_up?: number | null
+  floors_down?: number | null
+  /** The day's floors goal: the day's own (a Garmin Connect export's), else the watch's now. */
+  floors_goal?: number | null
   moderate_min?: number | null
   vigorous_min?: number | null
   hr_min?: number | null
@@ -971,7 +976,7 @@ export interface AccountDocument extends AccountDocumentRow {
 
 /** The kinds of data a calendar day can hold; the calendar draws one bar each. */
 export type CalendarKind =
-  | 'activity' | 'plan' | 'steps' | 'sleep' | 'hrv' | 'nap' | 'heart' | 'ecg' | 'stress' | 'body_battery' | 'weigh_in' | 'drink'
+  | 'activity' | 'plan' | 'steps' | 'floors' | 'sleep' | 'hrv' | 'nap' | 'heart' | 'ecg' | 'stress' | 'body_battery' | 'weigh_in' | 'drink'
 
 export interface CalendarActivity {
   id: number

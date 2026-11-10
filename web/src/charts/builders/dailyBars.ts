@@ -25,6 +25,8 @@ export interface DailyBarsInput {
   kind?: 'bar' | 'line'
   /** The top of the value axis (a score out of 100). */
   max?: number
+  /** Whole numbers only (floors): the value axis never steps by fractions. */
+  whole?: boolean
 }
 
 /** dailyBars draws one bar per day: lime for the day in focus, grey for context, a goal line. */
@@ -49,7 +51,7 @@ export function dailyBars(input: DailyBarsInput, ctx: Ctx): Option {
       },
     },
     xAxis: { type: 'category', data: input.labels, show: !!input.axis, boundaryGap: !line, axisLabel: { interval: 'auto', hideOverlap: true } },
-    yAxis: { type: 'value', show: !!input.yAxis, min: line ? 'dataMin' : 0, max: input.max, scale: line, splitNumber: 3 },
+    yAxis: { type: 'value', show: !!input.yAxis, min: line ? 'dataMin' : 0, max: input.max, scale: line, splitNumber: 3, minInterval: input.whole ? 1 : undefined },
     series: [line ? {
       type: 'line', data: input.v, symbol: 'none', connectNulls: false,
       lineStyle: { color: t.lime, width: 2 },

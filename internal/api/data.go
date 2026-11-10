@@ -89,6 +89,10 @@ func (s *Server) dailyJSON(ctx context.Context, user int64, from, to string) ([]
 	if err != nil {
 		return nil, err
 	}
+	watchGoal, err := s.watchFloorsGoal(ctx, user)
+	if err != nil {
+		return nil, err
+	}
 	byDay := map[string]map[string]float64{}
 	for _, v := range vals {
 		if byDay[v.Day] == nil {
@@ -112,6 +116,20 @@ func (s *Server) dailyJSON(ctx context.Context, user int64, from, to string) ([]
 		if h, ok := hrv[d.Day]; ok {
 			out[len(out)-1]["hrv"] = h
 		}
+		if d.AscentMM != nil {
+			// Floors as the watch counts them, with the day's own goal (a Garmin Connect export
+			// keeps one per day), else the goal the watch has now.
+			m := out[len(out)-1]
+			m["floors_up"] = wellness.Floors(*d.AscentMM)
+			if d.DescentMM != nil {
+				m["floors_down"] = wellness.Floors(*d.DescentMM)
+			}
+			if g := byDay[d.Day]["floors_goal"]; g > 0 {
+				m["floors_goal"] = int64(math.Round(g))
+			} else if watchGoal > 0 {
+				m["floors_goal"] = watchGoal
+			}
+		}
 	}
 	for day, v := range byDay { // days with daily values but no summary row
 		if !seen[day] {
@@ -120,6 +138,21 @@ func (s *Server) dailyJSON(ctx context.Context, user int64, from, to string) ([]
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["day"].(string) < out[j]["day"].(string) })
 	return out, nil
+}
+
+// watchFloorsGoal is the floors goal user's watch keeps (its daily ascent goal, in metres) as
+// floors; 0 without one.
+func (s *Server) watchFloorsGoal(ctx context.Context, user int64) (int64, error) {
+	goals, err := s.st.WatchGoals(ctx, user)
+	if err != nil {
+		return 0, err
+	}
+	for _, g := range goals {
+		if g.Type == "ascent" && g.Unit == "m" && g.Target > 0 {
+			return wellness.FloorsFromMetres(float64(g.Target)), nil
+		}
+	}
+	return 0, nil
 }
 
 func orEmpty(m map[string]float64) map[string]float64 {

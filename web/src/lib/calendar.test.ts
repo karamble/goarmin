@@ -14,7 +14,7 @@ const day = today('UTC')
 function cal(over: Partial<CalendarDay> = {}): CalendarDay {
   return {
     day, kinds: {}, activities: [], coach: [], plans: [],
-    summary: { day, steps: 7305, values: { step_goal: 8000, weight: 75.24 }, sleep_score: 79, sleep_s: 23160, resting_hr: 59, stress_avg: 24,
+    summary: { day, steps: 7305, floors_up: 9, floors_goal: 10, values: { step_goal: 8000, weight: 75.24 }, sleep_score: 79, sleep_s: 23160, resting_hr: 59, stress_avg: 24,
       body_battery_min: 17, body_battery_max: 77 },
     ...over,
   }
@@ -40,7 +40,7 @@ describe('calendar', () => {
 
   it('names activities and plans and gives the other kinds bars with their numbers', () => {
     const d = cal({
-      kinds: { activity: 1, plan: 2, steps: 1, sleep: 1, heart: 1, stress: 1, body_battery: 1, weigh_in: 1 },
+      kinds: { activity: 1, plan: 2, steps: 1, floors: 1, sleep: 1, heart: 1, stress: 1, body_battery: 1, weigh_in: 1 },
       activities: [{ id: 3, name: 'Morning', start: 0, end: 0, sport: 'running', sub_sport: 'generic', sport_label: 'Run', timer_s: 1800, distance_m: 5200, workout: '' }],
       coach: [
         { index: 0, name: 'Base', description: '', sport: 'running', duration_s: 2400, benefit: 2, aerobic_te: 2.5, rest_day: false, done: true, missed: false },
@@ -55,13 +55,17 @@ describe('calendar', () => {
       ['plan', 'Tempo', 'missed', 9],
     ])
     const bars = e.bars.filter((b) => b.kind !== 'activity' && b.kind !== 'plan')
-    expect(bars.map((b) => b.text)).toEqual(['7,305 steps', 'Sleep 79', 'Resting 59 bpm', 'Stress 24', 'Body Battery 17–77', '75.2 kg'])
+    expect(bars.map((b) => b.text)).toEqual(['7,305 steps', '9 floors', 'Sleep 79', 'Resting 59 bpm', 'Stress 24', 'Body Battery 17–77', '75.2 kg'])
     expect(bars[0].faint).toBe(true) // below the step goal
+    expect(bars[1].faint).toBe(true) // and below the floors goal
+    expect(dayEntries(cal({ kinds: { floors: 1 }, summary: { day, floors_up: 12, floors_goal: 10, values: {} } }), new Set(), 'metric').bars)
+      .toMatchObject([{ kind: 'floors', text: '12 floors', faint: false }])
     expect(e.bars.filter((b) => b.kind === 'plan').every((b) => b.hatched)).toBe(true)
 
     const hidden = dayEntries(d, new Set(['activity', 'plan', 'steps']), 'metric')
     expect(hidden.named).toEqual([])
-    expect(hidden.bars.map((b) => b.kind)).toEqual(['sleep', 'heart', 'stress', 'body_battery', 'weigh_in'])
+    expect(hidden.bars.map((b) => b.kind)).toEqual(['floors', 'sleep', 'heart', 'stress', 'body_battery', 'weigh_in'])
+    expect(dayEntries(d, new Set(['floors']), 'metric').bars.some((b) => b.kind === 'floors')).toBe(false)
   })
 
   it('fits bars into a cell with a count of the rest', () => {

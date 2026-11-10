@@ -25,6 +25,7 @@ const (
 	kindActivity    = "activity"
 	kindPlan        = "plan"
 	kindSteps       = "steps"
+	kindFloors      = "floors"
 	kindSleep       = "sleep"
 	kindHRV         = "hrv"
 	kindNap         = "nap"
@@ -115,6 +116,7 @@ func (s *Server) calendarDays(ctx context.Context, user int64, from, to string) 
 			}
 		}
 		set(kindSteps, positive(m["steps"]))
+		set(kindFloors, positive(m["floors_up"]))
 		set(kindHeart, positive(m["resting_hr"]) || positive(m["hr_avg"]))
 		set(kindStress, positive(m["stress_avg"]))
 		set(kindBodyBattery, positive(m["body_battery_max"]))

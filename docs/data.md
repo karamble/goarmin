@@ -130,6 +130,10 @@ or not:
   it when it is set.
 - **Running totals** (steps, distance, calories, ascent) count from local midnight. A total
   stamped exactly at midnight closes the day before.
+- **Floors** are the day's ascent and descent in whole floors of 10 ft (3.048 m), rounded down,
+  as the watch counts them. The floors goal is a day's own goal where a Garmin Connect export
+  gives one (`userFloorsAscendedGoal`); otherwise it is the watch's ascent goal from its goals
+  file (kept in metres: 30 m is 10 floors).
 
 ## What the watch does not send
 

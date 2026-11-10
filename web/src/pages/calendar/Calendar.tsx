@@ -266,7 +266,7 @@ function WeekList({ cells, byDay, hidden, units, p, onPick }: GridProps) {
 /** Legend names the bars' colours (the hidden kinds left out). */
 function Legend({ hidden }: { hidden: Set<CalendarKind> }) {
   const groups: [string, string, boolean?][] = [
-    ['Activity', kindInfo.activity.tone], ['Planned', kindInfo.plan.tone, true], ['Steps', kindInfo.steps.tone],
+    ['Activity', kindInfo.activity.tone], ['Planned', kindInfo.plan.tone, true], ['Steps, floors', kindInfo.steps.tone],
     ['Sleep, HRV, naps', kindInfo.sleep.tone], ['Heart rate, ECG', kindInfo.heart.tone], ['Stress, Body Battery', kindInfo.stress.tone],
     ['Weight, drinks', kindInfo.weigh_in.tone],
   ]

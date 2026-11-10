@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  asleep, chargeDrain, clockOfEvening, eveningMinutes, hourlyTotals, hrvOf, intensityWeek, localMinutes, rolling, Stage,
+  asleep, chargeDrain, clockOfEvening, eveningMinutes, hourlyFloors, hourlyTotals, hrvOf, intensityWeek, localMinutes, rolling, Stage,
   stageSegments, stressTime,
 } from './health'
 
@@ -34,6 +34,21 @@ describe('health', () => {
     expect(h[1]).toBe(7)
     expect(h[24]).toBe(3)
     expect(h.reduce((a, b) => a + b, 0)).toBe(25) // the point past the day is left out
+  })
+
+  it('counts whole floors per hour, adding up to the day', () => {
+    const from = now - 24 * 3600
+    // The Fenix 8's climbs of one day (metres per interval): 9 floors, finished in hours 2, 5 and 6.
+    const v = [3.048, 2.424, 2.956, 3.764, 1.659, 6.05, 2.571, 2.693, 2.267]
+    const t = [from + 2 * 3600, from + 5 * 3600, from + 5 * 3600 + 60, from + 5 * 3600 + 120, from + 6 * 3600,
+      from + 6 * 3600 + 60, from + 6 * 3600 + 120, from + 6 * 3600 + 180, from + 6 * 3600 + 240]
+    const h = hourlyFloors({ from, to: from + 24 * 3600, t, v })
+    expect(h).toHaveLength(24)
+    expect(h[2]).toBe(1)
+    expect(h[5]).toBe(3)
+    expect(h[6]).toBe(5)
+    expect(h.reduce((a, b) => a + b, 0)).toBe(9)
+    expect(hourlyFloors({ from, to: from + 24 * 3600, t: [from + 60], v: [2.9] }).every((x) => x === 0)).toBe(true)
   })
 
   it('sums Body Battery rises and falls', () => {

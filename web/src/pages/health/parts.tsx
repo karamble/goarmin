@@ -97,9 +97,9 @@ export interface KpiItem {
 }
 
 /** Kpis is a row of the period's key numbers. */
-export function Kpis({ items }: { items: KpiItem[] }) {
+export function Kpis({ items, cols = 'sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6' }: { items: KpiItem[]; cols?: string }) {
   return (
-    <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+    <dl className={`m-0 grid grid-cols-2 gap-x-6 gap-y-5 ${cols}`}>
       {items.map((k) => (
         <div key={k.label} className="min-w-0">
           <dt className="caps !text-[10px] !text-faint">{k.label}</dt>
